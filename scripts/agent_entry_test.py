@@ -19,6 +19,7 @@ class EntryExit(IdlStruct):
     capabilities: sequence[str]  # indicates sensing capabilities of agent, i.e. camera, lidar, etc.
     message_types: sequence[str]  # Indicates message topics this agent will publish
     ip_address: str  # IP address of the agent
+    timestamp: int  # Timestamp of the message
 
 my_ip = socket.gethostbyname(socket.gethostname())
 
@@ -36,7 +37,8 @@ writer = DataWriter(publisher, topic)
 
 # Publish a sample message
 for i in range(20):
-    message = EntryExit(i, 'robot', 'enter', ['camera', 'lidar'], ['object_detection', 'object_tracking'], my_ip)
+    timestamp = int(time.time())
+    message = EntryExit(i, 'robot', 'enter', ['camera', 'lidar'], ['object_detection', 'object_tracking'], my_ip, timestamp)
     writer.write(message)
 
     time.sleep(0.5)
