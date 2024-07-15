@@ -21,7 +21,12 @@ class EntryExit(IdlStruct):
     ip_address: str  # IP address of the agent
     timestamp: int  # Timestamp of the message
 
-my_ip = socket.gethostbyname(socket.gethostname())
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+# This doesn't have to be reachable; it just has to be a valid address
+s.connect(("8.8.8.8", 80))
+my_ip = s.getsockname()[0]
+s.close()
+print(f"My IP address is {my_ip}")
 
 # Create a DomainParticipant
 participant = DomainParticipant()
