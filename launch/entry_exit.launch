@@ -1,0 +1,3 @@
+<launch>
+    <node name="agent_entry_exit" pkg="mattbot_dds" type="agent_entry_exit.py" output="screen"/>
+</launch>
