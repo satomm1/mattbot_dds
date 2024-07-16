@@ -55,16 +55,26 @@ class Initialization(IdlStruct):
     map_md: str
 
 class EntryExitListener(Listener):
-    def __init__(self):
+    def __init__(self, participant, publisher, subscriber, my_id, my_ip, my_hash):
         super().__init__()
-        self.map_received = False
-        self.map_msg = OccupancyGrid()
-        self.map_md_msg = MapMetaData()
+        self.participant = participant
+        self.publisher = publisher
+        self.subscriber = subscriber
+        self.agents = dict()
+        self.temp_agents = dict()
+        self.exited_agents = dict()
+        self.lost_agents = dict()
+        self.my_id = my_id
+        self.my_ip = my_ip
+        self.my_hash = my_hash
+
+        self.update_to_agents = False
 
     def on_data_available(self, reader):
         for sample in reader.read():
+            print(sample)
 
-            if sample.agent_id == int(my_id):
+            if sample.agent_id == int(self.my_id):
                 continue
 
             # Determine what type of message was received
@@ -75,7 +85,7 @@ class EntryExitListener(Listener):
                 message_types = sample.message_types
                 ip_address = sample.ip_address
                 new_robot_hash = hash_id(str(sample.agent_id))
-                temp_agents[sample.agent_id] = {
+                self.agents[sample.agent_id] = {
                     'agent_type': agent_type,
                     'capabilities': capabilities,
                     'message_types': message_types,
@@ -83,25 +93,26 @@ class EntryExitListener(Listener):
                     'hash': new_robot_hash,
                     'timestamp': sample.timestamp
                 }  
+                self.update_to_agents = True
                 if find_if_closest_robot(new_robot_hash):
                     my_dict = {
-                        'id': int(my_id),
+                        'id': int(self.my_id),
                         'agent_type': AGENT_TYPE,
                         'capabilities': AGENT_CAPABILITIES,
                         'message_types': AGENT_MESSAGE_TYPES,
-                        'ip_address': my_ip,
-                        'hash': my_hash,
+                        'ip_address': self.my_ip,
+                        'hash': self.my_hash,
                         'timestamp': int(time.time())
                     }
                     sending_agent = json.dumps(my_dict)
 
                     if len(agents) > 0:
-                        agents_message = json.dumps(agents)
+                        agents_message = json.dumps(self.agents)
                     else:
                         agents_message = json.dumps("")
 
-                    init_receiving_topic = Topic(participant, 'InitializationTopic' + str(sample.agent_id), Initialization)
-                    init_receiving_write = DataWriter(publisher, init_receiving_topic)
+                    init_receiving_topic = Topic(self.participant, 'InitializationTopic' + str(sample.agent_id), Initialization)
+                    init_receiving_write = DataWriter(self.publisher, init_receiving_topic)
 
                     map_dict = message_converter.convert_ros_message_to_dictionary(map_msg)
                     map_json = json.dumps(map_dict)
@@ -112,41 +123,74 @@ class EntryExitListener(Listener):
                     init_receiving_write.write(init_message)
                     print("Sent initialization message to new agent")
 
-            elif sample.action == 'initialized':
+                    return
 
-                # Agent Initialized, move to agents dictionary
-                print(f'Agent {sample.agent_id} initialized in the environment')
-                if sample.agent_id in temp_agents:
-                    agents[sample.agent_id] = temp_agents.pop(sample.agent_id)
-                else:
-                    agent_type = sample.agent_type
-                    capabilities = sample.capabilities
-                    message_types = sample.message_types
-                    ip_address = sample.ip_address
-                    new_robot_hash = hash_id(str(sample.agent_id))
-                    agents[sample.agent_id] = {
-                        'agent_type': agent_type,
-                        'capabilities': capabilities,
-                        'message_types': message_types,
-                        'ip_address': ip_address,
-                        'hash': new_robot_hash,
-                        'timestamp': sample.timestamp
-                    }   
+            # elif sample.action == 'initialized':
+
+            #     # Agent Initialized, move to agents dictionary
+            #     print(f'Agent {sample.agent_id} initialized in the environment')
+            #     if sample.agent_id in self.temp_agents:
+            #         self.agents[sample.agent_id] = self.temp_agents.pop(sample.agent_id)
+            #         self.update_to_agents = True
+            #     else:
+            #         agent_type = sample.agent_type
+            #         capabilities = sample.capabilities
+            #         message_types = sample.message_types
+            #         ip_address = sample.ip_address
+            #         new_robot_hash = hash_id(str(sample.agent_id))
+            #         self.agents[sample.agent_id] = {
+            #             'agent_type': agent_type,
+            #             'capabilities': capabilities,
+            #             'message_types': message_types,
+            #             'ip_address': ip_address,
+            #             'hash': new_robot_hash,
+            #             'timestamp': sample.timestamp
+            #         }   
+            #         self.update_to_agents = True
 
             elif sample.action == 'exit':
 
                 # Agent Exited, remove from agents dictionary
-                if sample.agent_id in agents:
+                if sample.agent_id in self.agents:
                     print(f'Agent {sample.agent_id} exited the environment')
-                    exited_agents[sample.agent_id] = agents.pop(sample.agent_id)
+                    self.exited_agents[sample.agent_id] = self.agents.pop(sample.agent_id)
+                    self.update_to_agents = True
+
+    def agent_update_available(self):
+        return self.update_to_agents
+    
+    def get_agents(self):
+        self.update_to_agents = False
+        return self.agents, self.temp_agents, self.exited_agents, self.lost_agents
 
 class HeartbeatListener(Listener):
-    def on_data_available(self, reader):
-        for sample in reader.read():
-            if sample.agent_id in agents:
-                agents[sample.agent_id]['timestamp'] = sample.timestamp
+
+    def __init__(self, my_id):
+        super().__init__()
+        self.heartbeats = dict()
+        self.my_id = my_id
+        self.agents = dict()
+
+    def on_data_available(self, heartbeat_reader):
+        for sample in heartbeat_reader.read():
+
+            if sample.agent_id == int(self.my_id):
+                continue
+
+            if sample.agent_id in self.agents:
+                self.heartbeats[sample.agent_id] = sample.timestamp
             else:
                 print(f'Agent {sample.agent_id} is not in the environment')
+
+    def get_heartbeats(self):
+        return self.heartbeats
+
+    def update_agents(self, agents):
+        self.agents = agents
+        # Check for robot id in self.agents that isn't in self.heartbeats
+        for agent_id in self.agents.keys():
+            if agent_id not in self.heartbeats:
+                self.heartbeats[agent_id] = self.agents[agent_id]['timestamp']
 
 class InitializationListener(Listener):
 
@@ -156,8 +200,8 @@ class InitializationListener(Listener):
         self.map_msg = OccupancyGrid()
         self.map_md_msg = MapMetaData()
 
-    def on_data_available(self, reader):
-        for sample in reader.read():
+    def on_data_available(self, init_reader):
+        for sample in init_reader.read():
 
             sending_agent_dict = json.loads(sample.sending_agent)
             if sending_agent_dict['id'] == int(my_id):
@@ -318,8 +362,11 @@ if __name__ == '__main__':
     built_in_reader = BuiltinDataReader(participant, BuiltinTopicDcpsParticipant)
 
     # Create a DataReader
-    listener = EntryExitListener()
-    reader = DataReader(subscriber, entry_exit_topic, listener=listener)
+    entry_exit_listener = EntryExitListener(participant, publisher, subscriber, my_id, my_ip, my_hash)
+    reader = DataReader(subscriber, entry_exit_topic, listener=entry_exit_listener)
+
+    heartbeat_listener = HeartbeatListener(my_id)
+    heartbeat_reader = DataReader(subscriber, heartbeat_topic, listener=heartbeat_listener)
 
     num_participants = 0
     for sample in built_in_reader.take_iter(timeout=duration(milliseconds=100)):
@@ -422,25 +469,32 @@ if __name__ == '__main__':
         map_msg, map_md_msg = init_listener.get_map()
 
         # Send entry exit topic message that i am initialized
-        init_finished_message = EntryExit(int(my_id), AGENT_TYPE, 'initialized', AGENT_CAPABILITIES, AGENT_MESSAGE_TYPES, my_ip, int(time.time()))
-        enter_exit_writer.write(init_finished_message)
+        # init_finished_message = EntryExit(int(my_id), AGENT_TYPE, 'initialized', AGENT_CAPABILITIES, AGENT_MESSAGE_TYPES, my_ip, int(time.time()))
+        # enter_exit_writer.write(init_finished_message)
         print("Made it here")
     
 
     while True:
         current_time = int(time.time())
 
+        # Check for new agents
+        if entry_exit_listener.agent_update_available():
+            agents, temp_agents, exited_agents, lost_agents = entry_exit_listener.get_agents()
+
         print(agents)
+        heartbeat_listener.update_agents(agents)
 
         # Send out heartbeat
         heartbeat_message = Heartbeat(int(my_id), current_time)
         heartbeat_writer.write(heartbeat_message)
 
+        heartbeats = heartbeat_listener.get_heartbeats()
+
         # Check Periodically for Dead Agents
         dead_agents = []
         for agent_id, agent_info in agents.items():
-            agent_timestamp = agent_info['timestamp']
-            time_difference = current_time - agent_timestamp
+            time_difference = current_time - heartbeats[agent_id]
+            agent_timestamp = heartbeats[agent_id]
 
             if time_difference > HEARTBEAT_TIMEOUT:
                 print(f'Agent {agent_id} has not sent a heartbeat in too long')
