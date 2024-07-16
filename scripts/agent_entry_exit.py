@@ -1,4 +1,5 @@
 import rospy
+from nav_msgs.msg import OccupancyGrid, MapMetaData
 
 import cyclonedds
 from cyclonedds.domain import DomainParticipant
@@ -18,9 +19,13 @@ import time
 import os
 import hashlib
 import socket
+import json
 
 HEARTBEAT_FREQUENCY = 10
 HEARTBEAT_TIMEOUT = 15
+AGENT_CAPABILITIES = ['camera', 'lidar']
+AGENT_MESSAGE_TYPES = ['object_detection', 'object_tracking']
+AGENT_TYPE = 'robot'
 
 # Define a data class for the Entry/Exit messages
 @dataclass
@@ -38,6 +43,13 @@ class EntryExit(IdlStruct):
 class Heartbeat(IdlStruct):
     agent_id: int
     timestamp: int
+
+@dataclass 
+class Initialization(IdlStruct):   
+    sending_agent: str
+    agents: sequence[str]
+    map: str
+    map_md: str
 
 class EntryExitListener(Listener):
     def on_data_available(self, reader):
@@ -60,8 +72,25 @@ class EntryExitListener(Listener):
                     'timestamp': sample.timestamp
                 }  
                 if find_if_closest_robot(new_robot_hash):
-                    # TODO Perform Initialization
-                    pass
+                    my_dict = {
+                        'id': int(my_id),
+                        'agent_type': AGENT_TYPE,
+                        'capabilities': AGENT_CAPABILITIES,
+                        'message_types': AGENT_MESSAGE_TYPES,
+                        'ip_address': my_ip,
+                        'hash': my_hash,
+                        'timestamp': int(time.time())
+                    }
+                    sending_agent = json.dumps(my_dict)
+                    agents_message = json.dumps(agents)
+
+                    # TODO Get map too
+
+                    init_receiving_topic = Topic(participant, 'InitializationTopic' + str(sample.agent_id), Initialization)
+                    init_receiving_write = DataWriter(publisher, init_receiving_topic)
+
+                    init_message = Initialization(sending_agent, agents_message, '', '')
+                    init_receiving_write.write(init_message)
 
             elif sample.action == 'initialized':
 
@@ -99,6 +128,74 @@ class HeartbeatListener(Listener):
             else:
                 print(f'Agent {sample.agent_id} is not in the environment')
 
+class InitializationListener(Listener):
+    def on_data_available(self, reader):
+        for sample in reader.read():
+            print(f'Initialization message received from agent {sample.agents[0]}')
+            agent_dict = json.loads(sample.agents)
+
+            # Cycle through agents in the initialization message and insert into our agents dictionary
+            for agent_id, agent_info in agent_dict.items():
+                agent_type = agent_info['agent_type']
+                capabilities = agent_info['capabilities']
+                message_types = agent_info['message_types']
+                ip_address = agent_info['ip_address']
+                agent_hash = agent_info['hash']
+                agents[agent_id] = {
+                    'agent_type': agent_type,
+                    'capabilities': capabilities,
+                    'message_types': message_types,
+                    'ip_address': ip_address,
+                    'hash': agent_hash,
+                    'timestamp': sample.timestamp
+                }  
+
+            # Load the map from the initialization message
+            map_dict = json.loads(sample.map)
+            map_md_dict = json.loads(sample.map_md)
+
+            load_time = rospy.Time.now()
+
+            # Create the OccupancyGrid message
+            map_msg = OccupancyGrid()
+            map_msg.header.stamp = load_time
+            map_msg.header.frame_id = 'map'
+            map_msg.info.map_load_time = rospy.Time.now()
+            map_msg.info.resolution = map_md_dict['resolution']
+            map_msg.info.width = map_md_dict['width']
+            map_msg.info.height = map_md_dict['height']
+            map_msg.info.origin.position.x = map_md_dict['origin_x']
+            map_msg.info.origin.position.y = map_md_dict['origin_y']
+            map_msg.info.origin.position.z = map_md_dict['origin_z']
+            map_msg.info.origin.orientation.x = map_md_dict['origin_orientation_x']
+            map_msg.info.origin.orientation.y = map_md_dict['origin_orientation_y']
+            map_msg.info.origin.orientation.z = map_md_dict['origin_orientation_z']
+            map_msg.info.origin.orientation.w = map_md_dict['origin_orientation_w']
+            map_msg.data = map_dict['map_data']
+
+            # Creat map metadata message
+            map_md_msg = MapMetaData()
+            map_md_msg.map_load_time = load_time
+            map_md_msg.resolution = map_md_dict['resolution']
+            map_md_msg.width = map_md_dict['width']
+            map_md_msg.height = map_md_dict['height']
+            map_md_msg.origin.position.x = map_md_dict['origin_x']
+            map_md_msg.origin.position.y = map_md_dict['origin_y']
+            map_md_msg.origin.position.z = map_md_dict['origin_z']
+            map_md_msg.origin.orientation.x = map_md_dict['origin_orientation_x']
+            map_md_msg.origin.orientation.y = map_md_dict['origin_orientation_y']
+            map_md_msg.origin.orientation.z = map_md_dict['origin_orientation_z']
+            map_md_msg.origin.orientation.w = map_md_dict['origin_orientation_w']
+
+            # Publish the map and map metadata
+            map_publisher = rospy.Publisher('map', OccupancyGrid, queue_size=10)
+            map_md_publisher = rospy.Publisher('map_metadata', MapMetaData, queue_size=10)
+
+            map_publisher.publish(map_msg)
+            map_md_publisher.publish(map_md_msg)
+
+        amInitialized = True
+
 def hash_id(robot_id):
     return int(hashlib.sha256(robot_id.encode()).hexdigest(), 16) 
 
@@ -118,7 +215,7 @@ def find_if_closest_robot(robot_hash):
 
 def shutdown():
     print('Shutting down...')
-    exit_message = EntryExit(int(my_id), 'robot', 'exit', [], [], my_ip, int(time.time()))
+    exit_message = EntryExit(int(my_id), AGENT_TYPE, 'exit', [], [], my_ip, int(time.time()))
     enter_exit_writer.write(exit_message)
     rospy.signal_shutdown('Shutting down...')
 
@@ -173,11 +270,21 @@ if __name__ == '__main__':
         # TODO: Now do something...
     else:
         print('I am not the first agent to enter the environment')
-        entry_message = EntryExit(int(my_id), 'robot', 'enter', ['camera', 'lidar'], ['object_detection', 'object_tracking'], my_ip, int(time.time()))
-        enter_exit_writer.write(entry_message)
-        # TODO: continue with initialization
 
-    # Create a Subscriber for Entry/Exit Messages
+        init_topic = Topic(participant, 'InitializationTopic' + my_id, Initialization)
+
+        amInitialized = False
+        entry_message = EntryExit(int(my_id), AGENT_TYPE, 'enter', AGENT_CAPABILITIES, AGENT_MESSAGE_TYPES, my_ip, int(time.time()))
+        enter_exit_writer.write(entry_message)
+
+        while not amInitialized:
+            time.sleep(5)
+            if not amInitialized:
+                entry_message.timestamp = int(time.time())
+                enter_exit_writer.write(entry_message)
+       
+
+    # Now that we are initialized, we create a Subscriber for Entry/Exit Messages to listen for other agents
     subscriber = Subscriber(participant)
 
     # Create a DataReader
