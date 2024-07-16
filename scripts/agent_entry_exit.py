@@ -1,5 +1,6 @@
 import rospy
 from nav_msgs.msg import OccupancyGrid, MapMetaData
+from rospy_message_converter import message_converter
 
 import cyclonedds
 from cyclonedds.domain import DomainParticipant
@@ -20,6 +21,8 @@ import os
 import hashlib
 import socket
 import json
+import requests
+
 
 HEARTBEAT_FREQUENCY = 10
 HEARTBEAT_TIMEOUT = 15
@@ -47,13 +50,22 @@ class Heartbeat(IdlStruct):
 @dataclass 
 class Initialization(IdlStruct):   
     sending_agent: str
-    agents: sequence[str]
+    agents: str
     map: str
     map_md: str
 
 class EntryExitListener(Listener):
+    def __init__(self):
+        super().__init__()
+        self.map_received = False
+        self.map_msg = OccupancyGrid()
+        self.map_md_msg = MapMetaData()
+
     def on_data_available(self, reader):
         for sample in reader.read():
+
+            if sample.agent_id == int(my_id):
+                continue
 
             # Determine what type of message was received
             if sample.action == 'enter':
@@ -82,15 +94,23 @@ class EntryExitListener(Listener):
                         'timestamp': int(time.time())
                     }
                     sending_agent = json.dumps(my_dict)
-                    agents_message = json.dumps(agents)
 
-                    # TODO Get map too
+                    if len(agents) > 0:
+                        agents_message = json.dumps(agents)
+                    else:
+                        agents_message = json.dumps("")
 
                     init_receiving_topic = Topic(participant, 'InitializationTopic' + str(sample.agent_id), Initialization)
                     init_receiving_write = DataWriter(publisher, init_receiving_topic)
 
-                    init_message = Initialization(sending_agent, agents_message, '', '')
+                    map_dict = message_converter.convert_ros_message_to_dictionary(map_msg)
+                    map_json = json.dumps(map_dict)
+                    map_md_dict = message_converter.convert_ros_message_to_dictionary(map_md_msg)
+                    map_md_json = json.dumps(map_md_dict)
+
+                    init_message = Initialization(sending_agent, agents_message, map_json, map_md_json)
                     init_receiving_write.write(init_message)
+                    print("Sent initialization message to new agent")
 
             elif sample.action == 'initialized':
 
@@ -129,26 +149,48 @@ class HeartbeatListener(Listener):
                 print(f'Agent {sample.agent_id} is not in the environment')
 
 class InitializationListener(Listener):
+
+    def __init__(self):
+        super().__init__()
+        self.map_received = False
+        self.map_msg = OccupancyGrid()
+        self.map_md_msg = MapMetaData()
+
     def on_data_available(self, reader):
         for sample in reader.read():
-            print(f'Initialization message received from agent {sample.agents[0]}')
-            agent_dict = json.loads(sample.agents)
 
-            # Cycle through agents in the initialization message and insert into our agents dictionary
-            for agent_id, agent_info in agent_dict.items():
-                agent_type = agent_info['agent_type']
-                capabilities = agent_info['capabilities']
-                message_types = agent_info['message_types']
-                ip_address = agent_info['ip_address']
-                agent_hash = agent_info['hash']
-                agents[agent_id] = {
-                    'agent_type': agent_type,
-                    'capabilities': capabilities,
-                    'message_types': message_types,
-                    'ip_address': ip_address,
-                    'hash': agent_hash,
-                    'timestamp': sample.timestamp
-                }  
+            sending_agent_dict = json.loads(sample.sending_agent)
+            if sending_agent_dict['id'] == int(my_id):
+                continue
+
+            print(f'Initialization message received from agent {sending_agent_dict["id"]}')
+
+            agents[sending_agent_dict['id']] = {
+                'agent_type': sending_agent_dict['agent_type'],
+                'capabilities': sending_agent_dict['capabilities'],
+                'message_types': sending_agent_dict['message_types'],
+                'ip_address': sending_agent_dict['ip_address'],
+                'hash': sending_agent_dict['hash'],
+                'timestamp': sending_agent_dict['timestamp']
+            }
+
+            agent_dict = json.loads(sample.agents)
+            if len(agent_dict) > 0:
+                # Cycle through agents in the initialization message and insert into our agents dictionary
+                for agent_id, agent_info in agent_dict.items():
+                    agent_type = agent_info['agent_type']
+                    capabilities = agent_info['capabilities']
+                    message_types = agent_info['message_types']
+                    ip_address = agent_info['ip_address']
+                    agent_hash = agent_info['hash']
+                    agents[agent_id] = {
+                        'agent_type': agent_type,
+                        'capabilities': capabilities,
+                        'message_types': message_types,
+                        'ip_address': ip_address,
+                        'hash': agent_hash,
+                        'timestamp': sample.timestamp
+                    }  
 
             # Load the map from the initialization message
             map_dict = json.loads(sample.map)
@@ -157,35 +199,34 @@ class InitializationListener(Listener):
             load_time = rospy.Time.now()
 
             # Create the OccupancyGrid message
-            map_msg = OccupancyGrid()
-            map_msg.header.stamp = load_time
-            map_msg.header.frame_id = 'map'
-            map_msg.info.map_load_time = rospy.Time.now()
-            map_msg.info.resolution = map_md_dict['resolution']
-            map_msg.info.width = map_md_dict['width']
-            map_msg.info.height = map_md_dict['height']
-            map_msg.info.origin.position.x = map_md_dict['origin_x']
-            map_msg.info.origin.position.y = map_md_dict['origin_y']
-            map_msg.info.origin.position.z = map_md_dict['origin_z']
-            map_msg.info.origin.orientation.x = map_md_dict['origin_orientation_x']
-            map_msg.info.origin.orientation.y = map_md_dict['origin_orientation_y']
-            map_msg.info.origin.orientation.z = map_md_dict['origin_orientation_z']
-            map_msg.info.origin.orientation.w = map_md_dict['origin_orientation_w']
-            map_msg.data = map_dict['map_data']
+            self.map_msg.header.stamp = load_time
+            self.map_msg.header.frame_id = 'map'
+            self.map_msg.info.map_load_time = rospy.Time.now()
+            self.map_msg.info.resolution = map_md_dict['resolution']
+            self.map_msg.info.width = map_md_dict['width']
+            self.map_msg.info.height = map_md_dict['height']
+            self.map_msg.info.origin.position.x = map_md_dict['origin']['position']['x']
+            self.map_msg.info.origin.position.y = map_md_dict['origin']['position']['y']
+            self.map_msg.info.origin.position.z = map_md_dict['origin']['position']['z']
+            self.map_msg.info.origin.orientation.x = map_md_dict['origin']['orientation']['x']
+            self.map_msg.info.origin.orientation.y = map_md_dict['origin']['orientation']['y']
+            self.map_msg.info.origin.orientation.z = map_md_dict['origin']['orientation']['z']
+            self.map_msg.info.origin.orientation.w = map_md_dict['origin']['orientation']['w']
+            self.map_msg.data = map_dict['data']
 
-            # Creat map metadata message
-            map_md_msg = MapMetaData()
-            map_md_msg.map_load_time = load_time
-            map_md_msg.resolution = map_md_dict['resolution']
-            map_md_msg.width = map_md_dict['width']
-            map_md_msg.height = map_md_dict['height']
-            map_md_msg.origin.position.x = map_md_dict['origin_x']
-            map_md_msg.origin.position.y = map_md_dict['origin_y']
-            map_md_msg.origin.position.z = map_md_dict['origin_z']
-            map_md_msg.origin.orientation.x = map_md_dict['origin_orientation_x']
-            map_md_msg.origin.orientation.y = map_md_dict['origin_orientation_y']
-            map_md_msg.origin.orientation.z = map_md_dict['origin_orientation_z']
-            map_md_msg.origin.orientation.w = map_md_dict['origin_orientation_w']
+            # Create map metadata message
+            self.map_md_msg = MapMetaData()
+            self.map_md_msg.map_load_time = load_time
+            self.map_md_msg.resolution = map_md_dict['resolution']
+            self.map_md_msg.width = map_md_dict['width']
+            self.map_md_msg.height = map_md_dict['height']
+            self.map_md_msg.origin.position.x = map_md_dict['origin']['position']['x']
+            self.map_md_msg.origin.position.y = map_md_dict['origin']['position']['y']
+            self.map_md_msg.origin.position.z = map_md_dict['origin']['position']['z']
+            self.map_md_msg.origin.orientation.x = map_md_dict['origin']['orientation']['x']
+            self.map_md_msg.origin.orientation.y = map_md_dict['origin']['orientation']['y']
+            self.map_md_msg.origin.orientation.z = map_md_dict['origin']['orientation']['z']
+            self.map_md_msg.origin.orientation.w = map_md_dict['origin']['orientation']['w']
 
             # Publish the map and map metadata
             map_publisher = rospy.Publisher('map', OccupancyGrid, queue_size=10)
@@ -194,7 +235,15 @@ class InitializationListener(Listener):
             map_publisher.publish(map_msg)
             map_md_publisher.publish(map_md_msg)
 
-        amInitialized = True
+            self.map_received = True
+
+            print("Map received through initialization message")
+
+    def map_available(self):
+        return self.map_received
+
+    def get_map(self):
+        return self.map_msg, self.map_md_msg
 
 def hash_id(robot_id):
     return int(hashlib.sha256(robot_id.encode()).hexdigest(), 16) 
@@ -218,6 +267,9 @@ def shutdown():
     exit_message = EntryExit(int(my_id), AGENT_TYPE, 'exit', [], [], my_ip, int(time.time()))
     enter_exit_writer.write(exit_message)
     rospy.signal_shutdown('Shutting down...')
+
+map_msg = OccupancyGrid()
+map_md_msg = MapMetaData()
 
 if __name__ == '__main__':
 
@@ -243,6 +295,10 @@ if __name__ == '__main__':
 
     # Create a DomainParticipant
     participant = DomainParticipant()
+
+    # Create a Subscriber
+    subscriber = Subscriber(participant)
+    
     qos = Qos(
         Policy.Reliability.BestEffort,
         # Policy.Deadline(duration(microseconds=10)),
@@ -261,38 +317,120 @@ if __name__ == '__main__':
     # Builtin Topic to check if I am the first agent to enter the environment
     built_in_reader = BuiltinDataReader(participant, BuiltinTopicDcpsParticipant)
 
+    # Create a DataReader
+    listener = EntryExitListener()
+    reader = DataReader(subscriber, entry_exit_topic, listener=listener)
+
     num_participants = 0
     for sample in built_in_reader.take_iter(timeout=duration(milliseconds=100)):
         num_participants += 1
     
+    # map_msg = OccupancyGrid()
+    # map_md_msg = MapMetaData()
     if num_participants == 1:
         print('I am the first agent to enter the environment')
-        # TODO: Now do something...
+
+        server_url='http://192.168.50.2:8000/graphql'
+        map_query = """ 
+                            {
+                                map {
+                                    width
+                                    height
+                                    origin_x
+                                    origin_y
+                                    origin_z
+                                    origin_orientation_x
+                                    origin_orientation_y
+                                    origin_orientation_z
+                                    origin_orientation_w
+                                    resolution
+                                    occupancy
+                                }
+                            }
+                        """
+
+        have_map = False
+        while not have_map:
+            try:
+                # Get the map
+                response = requests.post(server_url, json={'query': map_query})
+                if response.status_code == 200:
+                    data = response.json()
+                    map_data = data.get('data', {}).get('map', {})
+                
+                    have_map = True
+
+                    # Convert the strings into the ROS Occupancy grid
+                    map_msg.header.frame_id = 'map'
+                    map_msg.info.width = map_data.get('width')
+                    map_msg.info.height = map_data.get('height')
+                    map_msg.info.resolution = map_data.get('resolution')
+                    map_msg.info.origin.position.x = map_data.get('origin_x')
+                    map_msg.info.origin.position.y = map_data.get('origin_y')
+                    map_msg.info.origin.position.z = map_data.get('origin_z')
+                    map_msg.info.origin.orientation.x = map_data.get('origin_orientation_x')
+                    map_msg.info.origin.orientation.y = map_data.get('origin_orientation_y')
+                    map_msg.info.origin.orientation.z = map_data.get('origin_orientation_z')
+                    map_msg.info.origin.orientation.w = map_data.get('origin_orientation_w')
+                    map_msg.data = map_data.get('occupancy')
+
+                    map_md_msg.map_load_time = rospy.Time.now()
+                    map_md_msg.resolution = map_data.get('resolution')
+                    map_md_msg.width = map_data.get('width')
+                    map_md_msg.height = map_data.get('height')
+                    map_md_msg.origin.position.x = map_data.get('origin_x')
+                    map_md_msg.origin.position.y = map_data.get('origin_y')
+                    map_md_msg.origin.position.z = map_data.get('origin_z')
+                    map_md_msg.origin.orientation.x = map_data.get('origin_orientation_x')
+                    map_md_msg.origin.orientation.y = map_data.get('origin_orientation_y')
+                    map_md_msg.origin.orientation.z = map_data.get('origin_orientation_z')
+                    map_md_msg.origin.orientation.w = map_data.get('origin_orientation_w')
+                    
+                    # Publish the map and map metadata
+                    map_publisher = rospy.Publisher('map', OccupancyGrid, queue_size=10)
+                    map_md_publisher = rospy.Publisher('map_metadata', MapMetaData, queue_size=10)
+
+                    map_publisher.publish(map_msg)
+                    map_md_publisher.publish(map_md_msg)
+
+                    print("Map retrieved")
+
+                else:
+                    print(f"Error retrieving map: {response.status_code}")
+            except Exception as e:
+                print(f"Error retrieving map: {e}")
+            time.sleep(1)
+
     else:
         print('I am not the first agent to enter the environment')
 
         init_topic = Topic(participant, 'InitializationTopic' + my_id, Initialization)
+        init_listener = InitializationListener()
+        init_reader = DataReader(subscriber, init_topic, listener=init_listener)
 
         amInitialized = False
         entry_message = EntryExit(int(my_id), AGENT_TYPE, 'enter', AGENT_CAPABILITIES, AGENT_MESSAGE_TYPES, my_ip, int(time.time()))
         enter_exit_writer.write(entry_message)
 
-        while not amInitialized:
-            time.sleep(5)
-            if not amInitialized:
+        while not init_listener.map_available():
+            print("No Map yet...")
+            time.sleep(1)
+            if not init_listener.map_available():
                 entry_message.timestamp = int(time.time())
                 enter_exit_writer.write(entry_message)
-       
 
-    # Now that we are initialized, we create a Subscriber for Entry/Exit Messages to listen for other agents
-    subscriber = Subscriber(participant)
+        map_msg, map_md_msg = init_listener.get_map()
 
-    # Create a DataReader
-    listener = EntryExitListener()
-    reader = DataReader(subscriber, entry_exit_topic, listener=listener)
+        # Send entry exit topic message that i am initialized
+        init_finished_message = EntryExit(int(my_id), AGENT_TYPE, 'initialized', AGENT_CAPABILITIES, AGENT_MESSAGE_TYPES, my_ip, int(time.time()))
+        enter_exit_writer.write(init_finished_message)
+        print("Made it here")
+    
 
     while True:
         current_time = int(time.time())
+
+        print(agents)
 
         # Send out heartbeat
         heartbeat_message = Heartbeat(int(my_id), current_time)
