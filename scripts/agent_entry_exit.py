@@ -1,6 +1,7 @@
 import rospy
 from nav_msgs.msg import OccupancyGrid, MapMetaData
 from rospy_message_converter import message_converter
+import tf
 
 from cyclonedds.domain import DomainParticipant
 from cyclonedds.topic import Topic
@@ -62,6 +63,10 @@ class Heartbeat(IdlStruct):
     """
     agent_id: int
     timestamp: int
+    location_valid: bool
+    x: float
+    y: float
+    theta: float
 
 @dataclass 
 class Initialization(IdlStruct):
@@ -283,6 +288,7 @@ class HeartbeatListener(Listener):
     def __init__(self, my_id):
         super().__init__()
         self.heartbeats = dict()
+        self.locations = dict()
         self.my_id = my_id
         self.agents = dict()
 
@@ -305,8 +311,15 @@ class HeartbeatListener(Listener):
             
             if sample.agent_id in self.agents:
                 self.heartbeats[sample.agent_id] = sample.timestamp
+
+                if sample.location_valid:
+                    self.locations[sample.agent_id] = (sample.x, sample.y, sample.theta)
+                else:
+                    self.locations[sample.agent_id] = None
+                    
             else:
                 print(f'Heartbeat from Agent {sample.agent_id}, but is not in the environment')
+                
 
     def get_heartbeats(self):
         """
@@ -316,6 +329,15 @@ class HeartbeatListener(Listener):
             dict: A copy of the heartbeats dictionary.
         """
         return self.heartbeats.copy()
+    
+    def get_heartbeats_and_locations(self):
+        """
+        Get a copy of the heartbeats and locations dictionaries.
+
+        Returns:
+            tuple: A tuple containing copies of the heartbeats and locations dictionaries.
+        """
+        return self.heartbeats.copy(), self.locations
 
     def update_agents(self, agents):
         """
@@ -547,6 +569,8 @@ class EntryExitCommunication:
         self.num_participants = 0
         self.graphql_server = server_url
 
+        self.trans_listener = tf.TransformListener()
+
     def setup_and_run(self):
         """
         Sets up the agent and runs it.
@@ -684,13 +708,31 @@ class EntryExitCommunication:
 
             self.heartbeat_listener.update_agents(self.agents)
 
+            # Get current position of the agent
+            location_valid = False
+            try:
+                (translation, rotation) = self.trans_listener.lookupTransform("map", "base_footprint", rospy.Time(0))
+                x = translation[0]
+                y = translation[1]
+                euler = tf.transformations.euler_from_quaternion(rotation)
+                theta = euler[2]
+                print(f'Current position: ({self.x}, {self.y}, {self.theta})')
+                location_valid = True
+            except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
+                print("Location not available yet")
+
             # Send out heartbeat
-            heartbeat_message = Heartbeat(int(self.my_id), current_time)
+            if location_valid:
+                heartbeat_message = Heartbeat(int(self.my_id), current_time, location_valid, x, y, theta)
+            else:
+                heartbeat_message = Heartbeat(int(self.my_id), current_time, location_valid, 0.0, 0.0, 0.0)
             self.heartbeat_writer.write(heartbeat_message)
 
-            heartbeats = self.heartbeat_listener.get_heartbeats()
+            heartbeats, locations = self.heartbeat_listener.get_heartbeats_and_locations()
             for agent_id, timestamp in heartbeats.items():
                 self.agents[agent_id]['timestamp'] = timestamp
+            
+            # TODO: Do something with the locations...
 
             # Check Periodically for Dead Agents
             dead_agents = []
@@ -698,7 +740,7 @@ class EntryExitCommunication:
                 time_difference = current_time - agent_info['timestamp']
 
                 if time_difference > HEARTBEAT_TIMEOUT:
-                    print(f'Agent {agent_id} has not sent a heartbeat in too long')
+                    print(f'Agent {agent_id} has timed out')
                     dead_agents.append(agent_id)
             
             # Remove Dead Agents
@@ -706,6 +748,7 @@ class EntryExitCommunication:
                 self.lost_agents[agent_id] = self.agents.pop(agent_id)
             if dead_agents:
                 self.entry_exit_listener.update_agents(agents=self.agents, lost_agents=self.lost_agents)
+
             time.sleep(HEARTBEAT_FREQUENCY)
 
     def shutdown(self):
