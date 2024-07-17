@@ -206,8 +206,8 @@ class HeartbeatListener(Listener):
         self.my_id = my_id
         self.agents = dict()
 
-    def on_data_available(self, heartbeat_reader):
-        for sample in heartbeat_reader.read():
+    def on_data_available(self, reader):
+        for sample in reader.read():
 
             if sample.agent_id == int(self.my_id):
                 continue
@@ -398,6 +398,7 @@ class EntryExitCommunication:
         self.init_listener = InitializationListener(self.my_id, self.map_publisher, self.map_md_publisher)
         self.enter_exit_reader = DataReader(self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener)
         self.my_init_reader = DataReader(self.subscriber, self.my_init_topic, listener=self.init_listener)
+        self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener)
 
         self.built_in_reader = BuiltinDataReader(self.participant, BuiltinTopicDcpsParticipant)
         self.num_participants = 0
