@@ -24,7 +24,7 @@ import json
 import requests
 
 # Constants (Set depending on the agent)
-HEARTBEAT_FREQUENCY = 10
+HEARTBEAT_FREQUENCY = 2
 HEARTBEAT_TIMEOUT = 15
 AGENT_CAPABILITIES = ['camera', 'lidar']
 AGENT_MESSAGE_TYPES = ['object_detection', 'object_tracking']
@@ -504,6 +504,9 @@ class EntryExitCommunication:
             self.map_publisher.publish(self.map_msg)
             self.map_md_publisher.publish(self.map_md_msg)
 
+            self.init_reader = None
+            self.init_listener = None
+
             print("Initialization complete")
 
     def run(self):
@@ -515,7 +518,7 @@ class EntryExitCommunication:
             if self.entry_exit_listener.agent_update_available():
                 self.agents, self.exited_agents, self.lost_agents = self.entry_exit_listener.get_agents()
 
-            print(self.agents)
+            # print(self.agents)
             self.heartbeat_listener.update_agents(self.agents)
 
             # Send out heartbeat
@@ -539,10 +542,6 @@ class EntryExitCommunication:
             # Remove Dead Agents
             for agent_id in dead_agents:
                 self.lost_agents[agent_id] = self.agents.pop(agent_id)
-
-            for sample in self.heartbeat_reader.read():
-                message = sample
-                print(f'Received: {message.agent_id} at {message.timestamp}')
 
             time.sleep(HEARTBEAT_FREQUENCY)
 
