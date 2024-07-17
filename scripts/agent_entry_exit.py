@@ -152,7 +152,6 @@ class EntryExitListener(Listener):
 
                     print("Sent initialization message to new agent")
             elif sample.action == 'exit':
-
                 # Agent Exited, remove from agents dictionary
                 if sample.agent_id in self.agents:
                     print(f'Agent {sample.agent_id} exited the environment')
@@ -192,6 +191,9 @@ class EntryExitListener(Listener):
     def get_agents(self):
         self.update_to_agents = False
         return self.agents, self.exited_agents, self.lost_agents
+
+    def update_agents(self, agents):
+        self.agents = agents
     
     def update_map(self, map, map_md):
         self.map_msg = map
@@ -501,6 +503,8 @@ class EntryExitCommunication:
             self.map_msg, self.map_md_msg = self.init_listener.get_map()
             self.agents = self.init_listener.get_agents()
 
+            self.entry_exit_listener.update_agents(self.agents)
+
             self.map_publisher.publish(self.map_msg)
             self.map_md_publisher.publish(self.map_md_msg)
 
@@ -547,7 +551,9 @@ class EntryExitCommunication:
 
     def shutdown(self):
         print('Shutting down...')
-        pass
+        
+        exit_message = EntryExit(int(self.my_id), AGENT_TYPE, 'exit', [], [], self.my_ip, int(time.time()))
+        self.enter_exit_writer.write(exit_message)
 
 
 if __name__ == '__main__':
