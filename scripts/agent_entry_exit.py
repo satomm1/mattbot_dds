@@ -100,7 +100,7 @@ class EntryExitListener(Listener):
 
     def on_data_available(self, reader):
         for sample in reader.read():
-            print(sample)
+            # print(sample)
 
             if sample.agent_id == int(self.my_id):
                 continue
@@ -261,20 +261,21 @@ class InitializationListener(Listener):
             if len(agent_dict) > 0:
                 # Cycle through agents in the initialization message and insert into our agents dictionary
                 for agent_id, agent_info in agent_dict.items():
-                    agent_type = agent_info['agent_type']
-                    capabilities = agent_info['capabilities']
-                    message_types = agent_info['message_types']
-                    ip_address = agent_info['ip_address']
-                    agent_hash = agent_info['hash']
-                    timestamp = agent_info['timestamp']
-                    self.agents[agent_id] = {
-                        'agent_type': agent_type,
-                        'capabilities': capabilities,
-                        'message_types': message_types,
-                        'ip_address': ip_address,
-                        'hash': agent_hash,
-                        'timestamp': timestamp
-                    }  
+                    if agent_id != self.my_id:
+                        agent_type = agent_info['agent_type']
+                        capabilities = agent_info['capabilities']
+                        message_types = agent_info['message_types']
+                        ip_address = agent_info['ip_address']
+                        agent_hash = agent_info['hash']
+                        timestamp = agent_info['timestamp']
+                        self.agents[agent_id] = {
+                            'agent_type': agent_type,
+                            'capabilities': capabilities,
+                            'message_types': message_types,
+                            'ip_address': ip_address,
+                            'hash': agent_hash,
+                            'timestamp': timestamp
+                        }  
 
             # Load the map from the initialization message
             map_dict = json.loads(sample.map)
