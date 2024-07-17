@@ -2,7 +2,6 @@ import rospy
 from nav_msgs.msg import OccupancyGrid, MapMetaData
 from rospy_message_converter import message_converter
 
-import cyclonedds
 from cyclonedds.domain import DomainParticipant
 from cyclonedds.topic import Topic
 from cyclonedds.sub import Subscriber, DataReader
@@ -15,7 +14,6 @@ from cyclonedds.builtin import BuiltinDataReader, BuiltinTopicDcpsParticipant
 
 from dataclasses import dataclass
 
-import asyncio
 import time
 import os
 import hashlib
@@ -83,6 +81,33 @@ class Initialization(IdlStruct):
     map_md: str
 
 class EntryExitListener(Listener):
+    """
+    Listener class for handling entry and exit events of agents in the environment.
+
+    Attributes:
+    - participant (Participant): The DDS participant.
+    - publisher (Publisher): The DDS publisher.
+    - subscriber (Subscriber): The DDS subscriber.
+    - my_id (int): The ID of the current agent.
+    - my_ip (str): The IP address of the current agent.
+    - my_hash (int): The hash value of the current agent.
+    - init_writer (Writer): The writer for sending initialization messages.
+    - agents (dict): Dictionary of active agents in the environment.
+    - exited_agents (dict): Dictionary of agents that have exited the environment.
+    - lost_agents (dict): Dictionary of agents that have been lost.
+    - map_msg (OccupancyGrid): The occupancy grid map message.
+    - map_md_msg (MapMetaData): The map metadata message.
+    - update_to_agents (bool): Flag indicating if there are updates to be sent to agents.
+
+    Methods:
+    - on_data_available(reader): Callback method for handling incoming data.
+    - find_if_closest_robot(robot_hash): Determines if the given robot is the closest robot to the current agent.
+    - agent_update_available(): Checks if there are updates to be sent to agents.
+    - get_agents(): Retrieves the active agents, exited agents, and lost agents.
+    - update_agents(agents): Updates the active agents.
+    - update_map(map, map_md): Updates the occupancy grid map and map metadata.
+    """
+
     def __init__(self, participant, publisher, subscriber, my_id, my_ip, my_hash, init_writer):
         super().__init__()
         self.participant = participant
@@ -101,6 +126,15 @@ class EntryExitListener(Listener):
         self.update_to_agents = False
 
     def on_data_available(self, reader):
+        """
+        Callback method for handling incoming data.
+
+        Parameters:
+        - reader (Reader): The DDS reader.
+
+        Returns:
+        - None
+        """
         for sample in reader.read():
             # print(sample)
 
@@ -170,7 +204,6 @@ class EntryExitListener(Listener):
         Returns:
         - bool: True if the given robot is the closest robot, False otherwise.
         """
-
         num_agents = len(self.agents) + 1
         my_distance = abs(self.my_hash / num_agents - robot_hash / num_agents)
 
@@ -186,20 +219,66 @@ class EntryExitListener(Listener):
         return True
 
     def agent_update_available(self):
+        """
+        Checks if there are updates to be sent to agents.
+
+        Returns:
+        - bool: True if there are updates, False otherwise.
+        """
         return self.update_to_agents
     
     def get_agents(self):
+        """
+        Retrieves the active agents, exited agents, and lost agents.
+
+        Returns:
+        - tuple: A tuple containing the active agents, exited agents, and lost agents.
+        """
         self.update_to_agents = False
         return self.agents, self.exited_agents, self.lost_agents
 
-    def update_agents(self, agents):
-        self.agents = agents
+    def update_agents(self, agents=None, exited_agents=None, lost_agents=None):
+        """
+        Updates the active agents.
+
+        Parameters:
+        - agents (dict): The updated dictionary of active agents.
+        - exited_agents (dict): The updated dictionary of exited agents.
+        - lost_agents (dict): The updated dictionary of lost agents.
+
+        Returns:
+        - None
+        """
+        if agents is not None:
+            self.agents = agents
+        if exited_agents is not None:
+           self.exited_agents = exited_agents
+        if lost_agents is not None:
+            self.lost_agents = lost_agents
     
     def update_map(self, map, map_md):
+        """
+        Updates the occupancy grid map and map metadata.
+
+        Parameters:
+        - map (OccupancyGrid): The updated occupancy grid map.
+        - map_md (MapMetaData): The updated map metadata.
+
+        Returns:
+        - None
+        """
         self.map_msg = map
         self.map_md_msg = map_md
 
 class HeartbeatListener(Listener):
+    """
+    Listener class that handles heartbeat data from agents.
+
+    Attributes:
+        heartbeats (dict): A dictionary to store the heartbeats of agents.
+        my_id (int): The ID of the current agent.
+        agents (dict): A dictionary to store information about all agents in the environment.
+    """
 
     def __init__(self, my_id):
         super().__init__()
@@ -208,6 +287,15 @@ class HeartbeatListener(Listener):
         self.agents = dict()
 
     def on_data_available(self, reader):
+        """
+        Callback method called when data is available in the reader.
+
+        Args:
+            reader (DataReader): The DataReader object.
+
+        Returns:
+            None
+        """
         for sample in reader.read():
 
             if sample.agent_id == int(self.my_id):
@@ -218,12 +306,27 @@ class HeartbeatListener(Listener):
             if sample.agent_id in self.agents:
                 self.heartbeats[sample.agent_id] = sample.timestamp
             else:
-                print(f'Agent {sample.agent_id} is not in the environment')
+                print(f'Heartbeat from Agent {sample.agent_id}, but is not in the environment')
 
     def get_heartbeats(self):
+        """
+        Get a copy of the heartbeats dictionary.
+
+        Returns:
+            dict: A copy of the heartbeats dictionary.
+        """
         return self.heartbeats.copy()
 
     def update_agents(self, agents):
+        """
+        Update the agents dictionary and heartbeats dictionary.
+
+        Args:
+            agents (dict): A dictionary containing information about all agents in the environment.
+
+        Returns:
+            None
+        """
         self.agents = agents
         # Check for robot id in self.agents that isn't in self.heartbeats
         for agent_id in self.agents.keys():
@@ -236,6 +339,18 @@ class HeartbeatListener(Listener):
                 self.heartbeats.pop(agent_id)
 
 class InitializationListener(Listener):
+    """
+    Listener class for handling initialization messages.
+
+    Attributes:
+        map_received (bool): Flag indicating if the map has been received.
+        map_msg (OccupancyGrid): OccupancyGrid message containing the map data.
+        map_md_msg (MapMetaData): MapMetaData message containing the map metadata.
+        agents (dict): Dictionary containing information about the agents.
+        my_id (int): ID of the current agent.
+        map_publisher: Publisher for the map message.
+        map_md_publisher: Publisher for the map metadata message.
+    """
 
     def __init__(self, my_id, map_publisher, map_md_publisher):
         super().__init__()
@@ -248,6 +363,12 @@ class InitializationListener(Listener):
         self.map_md_publisher = map_md_publisher
 
     def on_data_available(self, init_reader):
+        """
+        Callback function called when initialization data is available.
+
+        Args:
+            init_reader: Reader object for reading initialization data.
+        """
         for sample in init_reader.read():
 
             sending_agent_dict = json.loads(sample.sending_agent)
@@ -334,12 +455,30 @@ class InitializationListener(Listener):
             print("Map received through initialization message")
 
     def map_available(self):
+        """
+        Check if the map has been received.
+
+        Returns:
+            bool: True if the map has been received, False otherwise.
+        """
         return self.map_received
 
     def get_map(self):
+        """
+        Get the map and map metadata.
+
+        Returns:
+            tuple: A tuple containing the map message and map metadata message.
+        """
         return self.map_msg, self.map_md_msg
 
     def get_agents(self):
+        """
+        Get the agents dictionary.
+
+        Returns:
+            dict: Dictionary containing information about the agents.
+        """
         return self.agents
 
 def hash_id(robot_id):
@@ -354,7 +493,6 @@ def hash_id(robot_id):
 
     """
     return int(hashlib.sha256(robot_id.encode()).hexdigest(), 16)
-
 
 class EntryExitCommunication:
 
@@ -410,11 +548,26 @@ class EntryExitCommunication:
         self.graphql_server = server_url
 
     def setup_and_run(self):
+        """
+        Sets up the agent and runs it.
+        """
         self.setup()
         self.run()
 
     def setup(self):
-        
+        """
+        Sets up the agent by retrieving the map and initializing the environment.
+
+        If the agent is the first to enter the environment, it retrieves the map from a GraphQL server,
+        converts the map data into ROS Occupancy grid format, and publishes the map to the appropriate topics.
+
+        If the agent is not the first to enter the environment, it sends an entry message to the enter/exit writer,
+        waits for the map to become available, retrieves the map and agent information from the init listener,
+        updates the agent information, and publishes the map to the appropriate topics.
+
+        Returns:
+            None
+        """
         for _ in self.built_in_reader.take_iter(timeout=duration(milliseconds=100)):
             self.num_participants += 1
 
@@ -503,7 +656,7 @@ class EntryExitCommunication:
             self.map_msg, self.map_md_msg = self.init_listener.get_map()
             self.agents = self.init_listener.get_agents()
 
-            self.entry_exit_listener.update_agents(self.agents)
+            self.entry_exit_listener.update_agents(agents=self.agents)
 
             self.map_publisher.publish(self.map_msg)
             self.map_md_publisher.publish(self.map_md_msg)
@@ -514,7 +667,14 @@ class EntryExitCommunication:
             print("Initialization complete")
 
     def run(self):
-        
+        """
+        Executes the main loop of the agent_entry_exit node.
+        This method continuously checks for new agents, updates the heartbeat of existing agents,
+        sends out heartbeat messages, checks for dead agents, and removes them from the agent list.
+
+        Returns:
+            None
+        """
         while not rospy.is_shutdown():
             current_time = int(time.time())
                 
@@ -522,7 +682,6 @@ class EntryExitCommunication:
             if self.entry_exit_listener.agent_update_available():
                 self.agents, self.exited_agents, self.lost_agents = self.entry_exit_listener.get_agents()
 
-            # print(self.agents)
             self.heartbeat_listener.update_agents(self.agents)
 
             # Send out heartbeat
@@ -531,7 +690,6 @@ class EntryExitCommunication:
 
             heartbeats = self.heartbeat_listener.get_heartbeats()
             for agent_id, timestamp in heartbeats.items():
-                # print(f'Heartbeat from agent {agent_id} at time {timestamp}')
                 self.agents[agent_id]['timestamp'] = timestamp
 
             # Check Periodically for Dead Agents
@@ -546,7 +704,8 @@ class EntryExitCommunication:
             # Remove Dead Agents
             for agent_id in dead_agents:
                 self.lost_agents[agent_id] = self.agents.pop(agent_id)
-
+            if dead_agents:
+                self.entry_exit_listener.update_agents(agents=self.agents, lost_agents=self.lost_agents)
             time.sleep(HEARTBEAT_FREQUENCY)
 
     def shutdown(self):
