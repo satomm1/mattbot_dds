@@ -211,7 +211,9 @@ class HeartbeatListener(Listener):
 
             if sample.agent_id == int(self.my_id):
                 continue
-
+            
+            print(f'Heartbeat from agent {sample.agent_id} at time {sample.timestamp}')
+            
             if sample.agent_id in self.agents:
                 self.heartbeats[sample.agent_id] = sample.timestamp
             else:
@@ -226,6 +228,11 @@ class HeartbeatListener(Listener):
         for agent_id in self.agents.keys():
             if agent_id not in self.heartbeats:
                 self.heartbeats[agent_id] = self.agents[agent_id]['timestamp']
+
+        # Remove any heartbeats of agents that no longer exist
+        for agent_id in list(self.heartbeats.keys()):
+            if agent_id not in self.agents:
+                self.heartbeats.pop(agent_id)
 
 class InitializationListener(Listener):
 
@@ -513,7 +520,7 @@ class EntryExitCommunication:
 
             heartbeats = self.heartbeat_listener.get_heartbeats()
             for agent_id, timestamp in heartbeats.items():
-                print(f'Heartbeat from agent {agent_id} at time {timestamp}')
+                # print(f'Heartbeat from agent {agent_id} at time {timestamp}')
                 self.agents[agent_id]['timestamp'] = timestamp
 
             # Check Periodically for Dead Agents
@@ -524,7 +531,7 @@ class EntryExitCommunication:
                 if time_difference > HEARTBEAT_TIMEOUT:
                     print(f'Agent {agent_id} has not sent a heartbeat in too long')
                     dead_agents.append(agent_id)
-    
+            
             # Remove Dead Agents
             for agent_id in dead_agents:
                 self.lost_agents[agent_id] = self.agents.pop(agent_id)
