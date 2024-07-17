@@ -76,13 +76,14 @@ class Initialization(IdlStruct):
         map (str): A json of the ROS map message (Occupancy Grid) that the sending agent has.
         map_md (str): A json of the ROS map metadata message that the sending agent has.
     """
+    target_agent: int
     sending_agent: str
     agents: str
     map: str
     map_md: str
 
 class EntryExitListener(Listener):
-    def __init__(self, participant, publisher, subscriber, my_id, my_ip, my_hash):
+    def __init__(self, participant, publisher, subscriber, my_id, my_ip, my_hash, init_writer):
         super().__init__()
         self.participant = participant
         self.publisher = publisher
@@ -95,6 +96,7 @@ class EntryExitListener(Listener):
         self.my_hash = my_hash
         self.map_msg = OccupancyGrid()
         self.map_md_msg = MapMetaData()
+        self.init_writer = init_writer
 
         self.update_to_agents = False
 
@@ -140,17 +142,14 @@ class EntryExitListener(Listener):
                     else:
                         agents_message = json.dumps("")
 
-                    init_receiving_topic = Topic(self.participant, 'InitializationTopic' + str(sample.agent_id), Initialization)
-                    init_receiving_write = DataWriter(self.publisher, init_receiving_topic)
-
                     map_dict = message_converter.convert_ros_message_to_dictionary(self.map_msg)
                     map_json = json.dumps(map_dict)
                     map_md_dict = message_converter.convert_ros_message_to_dictionary(self.map_md_msg)
                     map_md_json = json.dumps(map_md_dict)
 
-                    init_message = Initialization(sending_agent, agents_message, map_json, map_md_json)
+                    init_message = Initialization(target_agent=sample.agent_id, sending_agent=sending_agent, agents=agents_message, map=map_json, map_md=map_md_json)
+                    self.init_writer.write(init_message)
 
-                    init_receiving_write.write(init_message)
                     print("Sent initialization message to new agent")
             elif sample.action == 'exit':
 
@@ -220,7 +219,7 @@ class HeartbeatListener(Listener):
                 print(f'Agent {sample.agent_id} is not in the environment')
 
     def get_heartbeats(self):
-        return self.heartbeats
+        return self.heartbeats.copy()
 
     def update_agents(self, agents):
         self.agents = agents
@@ -250,7 +249,11 @@ class InitializationListener(Listener):
         for sample in init_reader.read():
 
             sending_agent_dict = json.loads(sample.sending_agent)
+            print(f'Initialization message received from agent {sending_agent_dict["id"]}')
             if sending_agent_dict['id'] == int(self.my_id):
+                continue
+
+            if sample.target_agent != int(self.my_id):
                 continue
 
             print(f'Initialization message received from agent {sending_agent_dict["id"]}')
@@ -386,18 +389,18 @@ class EntryExitCommunication:
         # Create the topics needed
         self.entry_exit_topic = Topic(self.participant, 'EntryExitTopic', EntryExit)
         self.heartbeat_topic = Topic(self.participant, 'HeartbeatTopic', Heartbeat)
-        self.my_init_topic = Topic(self.participant, 'InitializationTopic' + self.my_id, Initialization)
+        self.init_topic = Topic(self.participant, 'InitializationTopic', Initialization)
 
         # Create the DataWriters and DataReaders
         self.enter_exit_writer = DataWriter(self.publisher, self.entry_exit_topic)
         self.heartbeat_writer = DataWriter(self.publisher, self.heartbeat_topic)
-        self.my_init_writer = DataWriter(self.publisher, self.my_init_topic)
+        self.init_writer = DataWriter(self.publisher, self.init_topic)
 
-        self.entry_exit_listener = EntryExitListener(self.participant, self.publisher, self.subscriber, self.my_id, self.my_ip, self.my_hash)
+        self.entry_exit_listener = EntryExitListener(self.participant, self.publisher, self.subscriber, self.my_id, self.my_ip, self.my_hash, self.init_writer)
         self.heartbeat_listener = HeartbeatListener(self.my_id)
         self.init_listener = InitializationListener(self.my_id, self.map_publisher, self.map_md_publisher)
         self.enter_exit_reader = DataReader(self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener)
-        self.my_init_reader = DataReader(self.subscriber, self.my_init_topic, listener=self.init_listener)
+        self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener)
         self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener)
 
         self.built_in_reader = BuiltinDataReader(self.participant, BuiltinTopicDcpsParticipant)
@@ -536,6 +539,10 @@ class EntryExitCommunication:
             # Remove Dead Agents
             for agent_id in dead_agents:
                 self.lost_agents[agent_id] = self.agents.pop(agent_id)
+
+            for sample in self.heartbeat_reader.read():
+                message = sample
+                print(f'Received: {message.agent_id} at {message.timestamp}')
 
             time.sleep(HEARTBEAT_FREQUENCY)
 
