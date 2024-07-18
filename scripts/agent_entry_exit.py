@@ -23,8 +23,9 @@ import json
 import requests
 
 # Constants (Set depending on the agent)
-HEARTBEAT_FREQUENCY = 2
-HEARTBEAT_TIMEOUT = 15
+HEARTBEAT_PERIOD = 2    # seconds
+HEARTBEAT_TIMEOUT = 15  # seconds
+LOCATION_FREQUENCY = 2  # Hz
 AGENT_CAPABILITIES = ['camera', 'lidar']
 AGENT_MESSAGE_TYPES = ['object_detection', 'object_tracking']
 AGENT_TYPE = 'robot'
@@ -84,6 +85,24 @@ class Initialization(IdlStruct):
     agents: str
     map: str
     map_md: str
+
+@dataclass
+class Location(IdlStruct):
+    """
+    Represents the location of an agent.
+
+    Attributes:
+        agent_id (int): The ID of the agent.
+        timestamp (int): The timestamp of the location message.
+        x (float): The x-coordinate of the agent.
+        y (float): The y-coordinate of the agent.
+        theta (float): The orientation of the agent.
+    """
+    agent_id: int
+    timestamp: int
+    x: float
+    y: float
+    theta: float
 
 class EntryExitListener(Listener):
     """
@@ -552,18 +571,20 @@ class EntryExitCommunication:
         self.entry_exit_topic = Topic(self.participant, 'EntryExitTopic', EntryExit)
         self.heartbeat_topic = Topic(self.participant, 'HeartbeatTopic', Heartbeat)
         self.init_topic = Topic(self.participant, 'InitializationTopic', Initialization)
+        self.location_topic = Topic(self.participant, 'LocationTopic', Location)
 
         # Create the DataWriters and DataReaders
         self.enter_exit_writer = DataWriter(self.publisher, self.entry_exit_topic)
         self.heartbeat_writer = DataWriter(self.publisher, self.heartbeat_topic)
         self.init_writer = DataWriter(self.publisher, self.init_topic)
+        self.location_writer = DataWriter(self.publisher, self.location_topic)
 
         self.entry_exit_listener = EntryExitListener(self.participant, self.publisher, self.subscriber, self.my_id, self.my_ip, self.my_hash, self.init_writer)
         self.heartbeat_listener = HeartbeatListener(self.my_id)
         self.init_listener = InitializationListener(self.my_id, self.map_publisher, self.map_md_publisher)
-        self.enter_exit_reader = DataReader(self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener)
-        self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener)
-        self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener)
+        self.enter_exit_reader = None
+        self.init_reader = None
+        self.heartbeat_reader = None
 
         self.built_in_reader = BuiltinDataReader(self.participant, BuiltinTopicDcpsParticipant)
         self.num_participants = 0
@@ -619,7 +640,7 @@ class EntryExitCommunication:
             while not have_map:
                 try:
                     # Get the map
-                    response = requests.post(self.graphql_server, json={'query': map_query})
+                    response = requests.post(self.graphql_server, json={'query': map_query}, timeout=1)
                     if response.status_code == 200:
                         data = response.json()
                         map_data = data.get('data', {}).get('map', {})
@@ -659,6 +680,10 @@ class EntryExitCommunication:
 
                         print("Map retrieved from GraphQL Server")
 
+                        self.enter_exit_reader = DataReader(self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener)
+                        self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener)
+                        self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener)
+
                     else:
                         print(f"Error retrieving map: {response.status_code}")
                 except Exception as e:
@@ -666,6 +691,9 @@ class EntryExitCommunication:
                 time.sleep(1)
         else:
             print('I am not the first agent to enter the environment')
+            self.enter_exit_reader = DataReader(self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener)
+            self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener)
+            self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener)
 
             entry_message = EntryExit(int(self.my_id), AGENT_TYPE, 'enter', AGENT_CAPABILITIES, AGENT_MESSAGE_TYPES, self.my_ip, int(time.time()))
             self.enter_exit_writer.write(entry_message)
@@ -699,14 +727,12 @@ class EntryExitCommunication:
         Returns:
             None
         """
+
+
+        rate = rospy.Rate(LOCATION_FREQUENCY)
+        last_time = int(time.time())
         while not rospy.is_shutdown():
             current_time = int(time.time())
-                
-            # Check for new agents
-            if self.entry_exit_listener.agent_update_available():
-                self.agents, self.exited_agents, self.lost_agents = self.entry_exit_listener.get_agents()
-
-            self.heartbeat_listener.update_agents(self.agents)
 
             # Get current position of the agent
             location_valid = False
@@ -718,38 +744,52 @@ class EntryExitCommunication:
                 theta = euler[2]
                 print(f'Current position: ({self.x}, {self.y}, {self.theta})')
                 location_valid = True
+
+                location_message = Location(int(self.my_id), current_time, x, y, theta)
+                self.location_writer.write(location_message)
+
             except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
                 print("Location not available yet")
+                
+            if current_time - last_time >= HEARTBEAT_PERIOD:
+                last_time = current_time
+                
 
-            # Send out heartbeat
-            if location_valid:
-                heartbeat_message = Heartbeat(int(self.my_id), current_time, location_valid, x, y, theta)
-            else:
-                heartbeat_message = Heartbeat(int(self.my_id), current_time, location_valid, 0.0, 0.0, 0.0)
-            self.heartbeat_writer.write(heartbeat_message)
+                # Check for new agents
+                if self.entry_exit_listener.agent_update_available():
+                    self.agents, self.exited_agents, self.lost_agents = self.entry_exit_listener.get_agents()
 
-            heartbeats, locations = self.heartbeat_listener.get_heartbeats_and_locations()
-            for agent_id, timestamp in heartbeats.items():
-                self.agents[agent_id]['timestamp'] = timestamp
-            
-            # TODO: Do something with the locations...
+                self.heartbeat_listener.update_agents(self.agents)
 
-            # Check Periodically for Dead Agents
-            dead_agents = []
-            for agent_id, agent_info in self.agents.items():
-                time_difference = current_time - agent_info['timestamp']
+                # Send out heartbeat
+                if location_valid:
+                    heartbeat_message = Heartbeat(int(self.my_id), current_time, location_valid, x, y, theta)
+                else:
+                    heartbeat_message = Heartbeat(int(self.my_id), current_time, location_valid, 0.0, 0.0, 0.0)
+                self.heartbeat_writer.write(heartbeat_message)
 
-                if time_difference > HEARTBEAT_TIMEOUT:
-                    print(f'Agent {agent_id} has timed out')
-                    dead_agents.append(agent_id)
-            
-            # Remove Dead Agents
-            for agent_id in dead_agents:
-                self.lost_agents[agent_id] = self.agents.pop(agent_id)
-            if dead_agents:
-                self.entry_exit_listener.update_agents(agents=self.agents, lost_agents=self.lost_agents)
+                heartbeats, locations = self.heartbeat_listener.get_heartbeats_and_locations()
+                for agent_id, timestamp in heartbeats.items():
+                    self.agents[agent_id]['timestamp'] = timestamp
+                
+                # TODO: Do something with the locations...
 
-            time.sleep(HEARTBEAT_FREQUENCY)
+                # Check Periodically for Dead Agents
+                dead_agents = []
+                for agent_id, agent_info in self.agents.items():
+                    time_difference = current_time - agent_info['timestamp']
+
+                    if time_difference > HEARTBEAT_TIMEOUT:
+                        print(f'Agent {agent_id} has timed out')
+                        dead_agents.append(agent_id)
+                
+                # Remove Dead Agents
+                for agent_id in dead_agents:
+                    self.lost_agents[agent_id] = self.agents.pop(agent_id)
+                if dead_agents:
+                    self.entry_exit_listener.update_agents(agents=self.agents, lost_agents=self.lost_agents)
+
+            rate.sleep()
 
     def shutdown(self):
         print('Shutting down...')
