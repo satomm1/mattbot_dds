@@ -1,5 +1,8 @@
 import rospy
 from nav_msgs.msg import OccupancyGrid, MapMetaData
+from mattbot_dds.msg import AgentLocationsArray
+from geometry_msgs.msg import Pose
+from std_msgs.msg import Header, Int32
 from rospy_message_converter import message_converter
 import tf
 
@@ -666,6 +669,9 @@ class EntryExitCommunication:
         self.trans_listener = tf.TransformListener()
         self.my_location = None
 
+        # ROS publisher for publishing nearby agents locations
+        self.agent_locations_publisher = rospy.Publisher('agent_locations', AgentLocationsArray, queue_size=10)
+
     def hash_id(self, robot_id):
         """
         Hashes the given robot ID using SHA-256 algorithm.
@@ -861,6 +867,32 @@ class EntryExitCommunication:
                 # location_valid = True
                 # location_message = Location(int(self.my_id), current_time, x, y, theta)
                 # self.location_writer.write(location_message)
+
+            nearby_agents_locations = self.location_listener.get_locations()
+            agent_locations_array = AgentLocationsArray()
+            agent_locations_array.header.stamp = rospy.Time.now()
+            agent_locations_array.header.frame_id = 'map'
+            agent_list = []
+            agent_location_list = []
+            for agent_id, location in nearby_agents_locations.items():
+                id_msg = Int32()
+                id_msg.data = int(agent_id)
+                agent_list.append(id_msg)   
+                agent_pose = Pose()
+                agent_pose.position.x = location[0]
+                agent_pose.position.y = location[1]
+                agent_pose.position.z = 0
+                quat = tf.transformations.quaternion_from_euler(0, 0, location[2])
+                agent_pose.orientation.x = quat[0]
+                agent_pose.orientation.y = quat[1]
+                agent_pose.orientation.z = quat[2]
+                agent_pose.orientation.w = quat[3]
+                agent_location_list.append(agent_pose)
+            agent_locations_array.agentIDs = agent_list
+            agent_locations_array.locations = agent_location_list
+
+            if len(agent_list):
+                self.agent_locations_publisher.publish(agent_locations_array)
                 
             # Now publish heartbeat periodically
             if current_time - last_time >= HEARTBEAT_PERIOD:
