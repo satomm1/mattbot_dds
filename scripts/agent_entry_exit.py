@@ -541,8 +541,9 @@ class EntryExitCommunication:
 
         # Get robot ID, Hash, and IP Address
         self.my_id = os.environ.get('ROBOT_ID')
-        self.my_hash = hash_id(self.my_id)
+        self.my_hash = self.hash_id(self.my_id)
 
+        # Get IP Address
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         # This doesn't have to be reachable; it just has to be a valid address
         s.connect(("8.8.8.8", 80))
@@ -571,7 +572,7 @@ class EntryExitCommunication:
         self.entry_exit_topic = Topic(self.participant, 'EntryExitTopic', EntryExit)
         self.heartbeat_topic = Topic(self.participant, 'HeartbeatTopic', Heartbeat)
         self.init_topic = Topic(self.participant, 'InitializationTopic', Initialization)
-        self.location_topic = Topic(self.participant, 'LocationTopic', Location)
+        self.location_topic = Topic(self.participant, 'LocationTopic'+ str(self.my_id), Location)
 
         # Create the DataWriters and DataReaders
         self.enter_exit_writer = DataWriter(self.publisher, self.entry_exit_topic)
@@ -582,15 +583,33 @@ class EntryExitCommunication:
         self.entry_exit_listener = EntryExitListener(self.participant, self.publisher, self.subscriber, self.my_id, self.my_ip, self.my_hash, self.init_writer)
         self.heartbeat_listener = HeartbeatListener(self.my_id)
         self.init_listener = InitializationListener(self.my_id, self.map_publisher, self.map_md_publisher)
+        
+        # We will start the readers later when it is necessary
         self.enter_exit_reader = None
         self.init_reader = None
         self.heartbeat_reader = None
 
+        # Built-in reader to detect number of participants
         self.built_in_reader = BuiltinDataReader(self.participant, BuiltinTopicDcpsParticipant)
         self.num_participants = 0
+
+        # GraphQL server URL
         self.graphql_server = server_url
 
+        # TF Listener to get current robot position
         self.trans_listener = tf.TransformListener()
+
+    def hash_id(self, robot_id):
+        """
+        Hashes the given robot ID using SHA-256 algorithm.
+
+        Parameters:
+        robot_id (str): The robot ID to be hashed.
+
+        Returns:
+        int: The hashed robot ID as an integer.
+        """
+        return int(hashlib.sha256(robot_id.encode()).hexdigest(), 16)
 
     def setup_and_run(self):
         """
@@ -613,10 +632,13 @@ class EntryExitCommunication:
         Returns:
             None
         """
+
+        # Determine the number of participants on the DDS network
         for _ in self.built_in_reader.take_iter(timeout=duration(milliseconds=100)):
             self.num_participants += 1
 
         if self.num_participants == 1:
+            # We are the first participant, we are responsible for getting the map
             print('I am the first agent to enter the environment')
 
             map_query = """ 
@@ -637,9 +659,9 @@ class EntryExitCommunication:
                             }
                         """
             have_map = False
-            while not have_map:
+            while not have_map:  # Retry until we are able to get the map
                 try:
-                    # Get the map
+                    # Get the map from the GraphQL server
                     response = requests.post(self.graphql_server, json={'query': map_query}, timeout=1)
                     if response.status_code == 200:
                         data = response.json()
@@ -675,29 +697,34 @@ class EntryExitCommunication:
 
                         self.entry_exit_listener.update_map(self.map_msg, self.map_md_msg)
 
+                        # Publish the map and map metadata for ROS nodes
                         self.map_publisher.publish(self.map_msg)
                         self.map_md_publisher.publish(self.map_md_msg)
 
                         print("Map retrieved from GraphQL Server")
 
+                        # Start the readers now that we have the map
                         self.enter_exit_reader = DataReader(self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener)
                         self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener)
                         self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener)
-
                     else:
                         print(f"Error retrieving map: {response.status_code}")
                 except Exception as e:
                     print(f"Error retrieving map: {e}")
                 time.sleep(1)
         else:
+            # We are not the first participant, we will get the map from one of the other agents
             print('I am not the first agent to enter the environment')
+
+            # We start the readers now since we will need them to access map information
             self.enter_exit_reader = DataReader(self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener)
             self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener)
-            self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener)
 
+            # Broadcast an entry message
             entry_message = EntryExit(int(self.my_id), AGENT_TYPE, 'enter', AGENT_CAPABILITIES, AGENT_MESSAGE_TYPES, self.my_ip, int(time.time()))
             self.enter_exit_writer.write(entry_message)
 
+            # Wait for the map to become available
             while not self.init_listener.map_available():
                 print("No Map yet...")
                 time.sleep(1)
@@ -705,16 +732,21 @@ class EntryExitCommunication:
                     entry_message.timestamp = int(time.time())
                     self.enter_exit_writer.write(entry_message)
 
+            # Store the map, map metadata, and agents
             self.map_msg, self.map_md_msg = self.init_listener.get_map()
             self.agents = self.init_listener.get_agents()
 
+            # Update the agents in the entry/exit listener
             self.entry_exit_listener.update_agents(agents=self.agents)
 
+            # Publish the map and map metadata for ROS nodes
             self.map_publisher.publish(self.map_msg)
             self.map_md_publisher.publish(self.map_md_msg)
 
+            # Start the heartbeat reader now that we have the map, stop listening for initialization messages
             self.init_reader = None
             self.init_listener = None
+            self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener)
 
             print("Initialization complete")
 
@@ -728,13 +760,13 @@ class EntryExitCommunication:
             None
         """
 
-
+        # Loop through at the rate we publish location
         rate = rospy.Rate(LOCATION_FREQUENCY)
         last_time = int(time.time())
         while not rospy.is_shutdown():
             current_time = int(time.time())
 
-            # Get current position of the agent
+            # Get current position of the agent and publish to location topic
             location_valid = False
             try:
                 (translation, rotation) = self.trans_listener.lookupTransform("map", "base_footprint", rospy.Time(0))
@@ -745,16 +777,17 @@ class EntryExitCommunication:
                 print(f'Current position: ({self.x}, {self.y}, {self.theta})')
                 location_valid = True
 
+                # Publish to this agent's location topic
                 location_message = Location(int(self.my_id), current_time, x, y, theta)
                 self.location_writer.write(location_message)
 
             except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
                 print("Location not available yet")
                 
+            # Now publish heartbeat periodically
             if current_time - last_time >= HEARTBEAT_PERIOD:
                 last_time = current_time
                 
-
                 # Check for new agents
                 if self.entry_exit_listener.agent_update_available():
                     self.agents, self.exited_agents, self.lost_agents = self.entry_exit_listener.get_agents()
@@ -768,11 +801,12 @@ class EntryExitCommunication:
                     heartbeat_message = Heartbeat(int(self.my_id), current_time, location_valid, 0.0, 0.0, 0.0)
                 self.heartbeat_writer.write(heartbeat_message)
 
+                # Update agents with new heartbeats
                 heartbeats, locations = self.heartbeat_listener.get_heartbeats_and_locations()
                 for agent_id, timestamp in heartbeats.items():
                     self.agents[agent_id]['timestamp'] = timestamp
                 
-                # TODO: Do something with the locations...
+                # TODO: Do something with the locations...find agents within certain range
 
                 # Check Periodically for Dead Agents
                 dead_agents = []
@@ -780,6 +814,7 @@ class EntryExitCommunication:
                     time_difference = current_time - agent_info['timestamp']
 
                     if time_difference > HEARTBEAT_TIMEOUT:
+                        # Agent has timed out
                         print(f'Agent {agent_id} has timed out')
                         dead_agents.append(agent_id)
                 
@@ -793,7 +828,7 @@ class EntryExitCommunication:
 
     def shutdown(self):
         print('Shutting down...')
-        
+        # Write exit message
         exit_message = EntryExit(int(self.my_id), AGENT_TYPE, 'exit', [], [], self.my_ip, int(time.time()))
         self.enter_exit_writer.write(exit_message)
 
