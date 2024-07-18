@@ -29,7 +29,7 @@ LOCATION_FREQUENCY = 2  # Hz
 AGENT_CAPABILITIES = ['camera', 'lidar']
 AGENT_MESSAGE_TYPES = ['object_detection', 'object_tracking']
 AGENT_TYPE = 'robot'
-
+DISTANCE_THRESHOLD = 5.0
 
 @dataclass
 class EntryExit(IdlStruct):
@@ -522,6 +522,70 @@ class InitializationListener(Listener):
         """
         return self.agents
 
+class LocationListener(Listener):
+    """
+    Listener class that handles location data for agents.
+
+    Attributes:
+        my_id (int): The ID of the listener.
+        agent_ids (list): List of agent IDs.
+        locations (dict): Dictionary to store agent locations.
+
+    Methods:
+        on_data_available(reader): Callback method called when data is available.
+        get_locations(): Returns the locations dictionary.
+        set_agent_ids(agent_ids): Sets the agent IDs and updates the locations dictionary.
+    """
+
+    def __init__(self, my_id):
+        super().__init__()
+        self.my_id = my_id
+        self.agent_ids = []
+        self.locations = dict()
+
+    def on_data_available(self, reader):
+        """
+        Callback method called when data is available.
+
+        Args:
+            reader: The data reader object.
+
+        Returns:
+            None
+        """
+        for sample in reader.read():
+            if sample.agent_id == int(self.my_id):
+                continue
+            
+            if sample.agent_id in self.agent_ids:
+                print(f'Location message from agent {sample.agent_id} at time {sample.timestamp}')
+                self.locations[sample.agent_id] = (sample.x, sample.y, sample.theta)
+
+    def get_locations(self):
+        """
+        Returns the locations dictionary.
+
+        Returns:
+            dict: Dictionary containing agent locations.
+        """
+        return self.locations
+
+    def set_agent_ids(self, agent_ids):
+        """
+        Sets the agent IDs and updates the locations dictionary.
+
+        Args:
+            agent_ids (list): List of agent IDs.
+
+        Returns:
+            None
+        """
+        self.agent_ids = agent_ids
+        # pop all location values that are not in agent_ids
+        for agent_id in list(self.locations.keys()):
+            if agent_id not in agent_ids:
+                self.locations.pop(agent_id)
+
 def hash_id(robot_id):
     """
     Hashes the given robot ID using SHA-256 algorithm.
@@ -583,11 +647,13 @@ class EntryExitCommunication:
         self.entry_exit_listener = EntryExitListener(self.participant, self.publisher, self.subscriber, self.my_id, self.my_ip, self.my_hash, self.init_writer)
         self.heartbeat_listener = HeartbeatListener(self.my_id)
         self.init_listener = InitializationListener(self.my_id, self.map_publisher, self.map_md_publisher)
-        
+        self.location_listener = LocationListener(self.my_id)
+
         # We will start the readers later when it is necessary
         self.enter_exit_reader = None
         self.init_reader = None
         self.heartbeat_reader = None
+        self.location_readers = dict()
 
         # Built-in reader to detect number of participants
         self.built_in_reader = BuiltinDataReader(self.participant, BuiltinTopicDcpsParticipant)
@@ -598,6 +664,7 @@ class EntryExitCommunication:
 
         # TF Listener to get current robot position
         self.trans_listener = tf.TransformListener()
+        self.my_location = None
 
     def hash_id(self, robot_id):
         """
@@ -760,6 +827,8 @@ class EntryExitCommunication:
             None
         """
 
+        prev_nearby_agents = []
+
         # Loop through at the rate we publish location
         rate = rospy.Rate(LOCATION_FREQUENCY)
         last_time = int(time.time())
@@ -774,6 +843,8 @@ class EntryExitCommunication:
                 y = translation[1]
                 euler = tf.transformations.euler_from_quaternion(rotation)
                 theta = euler[2]
+
+                self.my_location = (x, y, theta)
                 print(f'Current position: ({self.x}, {self.y}, {self.theta})')
                 location_valid = True
 
@@ -783,6 +854,13 @@ class EntryExitCommunication:
 
             except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
                 print("Location not available yet")
+                # x = 1
+                # y = 2
+                # theta = 3
+                # self.my_location = (x, y, theta)
+                # location_valid = True
+                # location_message = Location(int(self.my_id), current_time, x, y, theta)
+                # self.location_writer.write(location_message)
                 
             # Now publish heartbeat periodically
             if current_time - last_time >= HEARTBEAT_PERIOD:
@@ -791,6 +869,7 @@ class EntryExitCommunication:
                 # Check for new agents
                 if self.entry_exit_listener.agent_update_available():
                     self.agents, self.exited_agents, self.lost_agents = self.entry_exit_listener.get_agents()
+                current_agents_list = list(self.agents.keys())
 
                 self.heartbeat_listener.update_agents(self.agents)
 
@@ -804,9 +883,34 @@ class EntryExitCommunication:
                 # Update agents with new heartbeats
                 heartbeats, locations = self.heartbeat_listener.get_heartbeats_and_locations()
                 for agent_id, timestamp in heartbeats.items():
-                    self.agents[agent_id]['timestamp'] = timestamp
+                    if agent_id in current_agents_list:
+                        self.agents[agent_id]['timestamp'] = timestamp
+
+                nearby_agents = []
+                for agent_id, location in locations.items():
+                    if location is not None and agent_id in current_agents_list:
+                        x, y, theta = location
+                        self.agents[agent_id]['location'] = (x, y, theta)
+
+                        # Determine if the agent is close to the robot
+                        if self.my_location is not None:
+                            distance = ((x - self.my_location[0])**2 + (y - self.my_location[1])**2)**0.5
+                            if distance < DISTANCE_THRESHOLD:
+                                print(f'Agent {agent_id} is close to the robot')
+                                nearby_agents.append(agent_id)
+                                if 'agent_id' not in list(self.location_readers.keys()):
+                                    new_location_topic = Topic(self.participant, 'LocationTopic' + str(agent_id), Location)
+                                    self.location_readers[agent_id] = DataReader(self.subscriber, new_location_topic, listener=self.location_listener)
                 
-                # TODO: Do something with the locations...find agents within certain range
+                # Only need to perform this housekeeping if the list of nearby agents has changed
+                if nearby_agents != prev_nearby_agents:
+                    prev_nearby_agents = nearby_agents
+                   
+                    # Remove readers that are no longer needed
+                    for agent_id in list(self.location_readers.keys()):
+                        if agent_id not in nearby_agents:
+                            self.location_readers.pop(agent_id)
+                    self.location_listener.set_agent_ids(nearby_agents)  # update the list of agents we should be listening for
 
                 # Check Periodically for Dead Agents
                 dead_agents = []
