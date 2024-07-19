@@ -859,14 +859,14 @@ class EntryExitCommunication:
                 self.location_writer.write(location_message)
 
             except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
-                print("Location not available yet")
-                # x = 1
-                # y = 2
-                # theta = 3
-                # self.my_location = (x, y, theta)
-                # location_valid = True
-                # location_message = Location(int(self.my_id), current_time, x, y, theta)
-                # self.location_writer.write(location_message)
+                # print("Location not available yet")
+                x = 1
+                y = 2
+                theta = 3
+                self.my_location = (x, y, theta)
+                location_valid = True
+                location_message = Location(int(self.my_id), current_time, x, y, theta)
+                self.location_writer.write(location_message)
 
             nearby_agents_locations = self.location_listener.get_locations()
             agent_locations_array = AgentLocationsArray()
@@ -918,7 +918,7 @@ class EntryExitCommunication:
                     if agent_id in current_agents_list:
                         self.agents[agent_id]['timestamp'] = timestamp
 
-                nearby_agents = []
+                nearby_agents = set()
                 for agent_id, location in locations.items():
                     if location is not None and agent_id in current_agents_list:
                         x, y, theta = location
@@ -929,7 +929,7 @@ class EntryExitCommunication:
                             distance = ((x - self.my_location[0])**2 + (y - self.my_location[1])**2)**0.5
                             if distance < DISTANCE_THRESHOLD:
                                 print(f'Agent {agent_id} is close to the robot')
-                                nearby_agents.append(agent_id)
+                                nearby_agents.add(agent_id)
                                 if 'agent_id' not in list(self.location_readers.keys()):
                                     new_location_topic = Topic(self.participant, 'LocationTopic' + str(agent_id), Location)
                                     self.location_readers[agent_id] = DataReader(self.subscriber, new_location_topic, listener=self.location_listener)
