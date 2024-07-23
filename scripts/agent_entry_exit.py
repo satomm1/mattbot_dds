@@ -1,10 +1,11 @@
 import rospy
 from nav_msgs.msg import OccupancyGrid, MapMetaData
 from mattbot_dds.msg import AgentLocationsArray
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import Pose, Pose2D
 from std_msgs.msg import Header, Int32
 from rospy_message_converter import message_converter
 import tf
+import rospkg
 
 from cyclonedds.domain import DomainParticipant
 from cyclonedds.topic import Topic
@@ -106,6 +107,22 @@ class Location(IdlStruct):
     x: float
     y: float
     theta: float
+
+@dataclass
+class RobotGoal(IdlStruct):
+    """
+    Represents the goal of a robot.
+
+    Attributes:
+        id (int): The ID of the robot.
+        x_goal (float): The x-coordinate of the goal.
+        y_goal (float): The y-coordinate of the goal.
+        theta_goal (float): The orientation of the goal.
+    """
+    id: int
+    x_goal: float
+    y_goal: float
+    theta_goal: float
 
 class EntryExitListener(Listener):
     """
@@ -590,6 +607,23 @@ class LocationListener(Listener):
             if agent_id not in agent_ids:
                 self.locations.pop(agent_id)
 
+class GoalListener(Listener):
+
+    def __init__(self, my_id, goal_pub):
+        super().__init__()
+        self.my_id = my_id
+        self.goal_pub = goal_pub
+
+    def on_data_available(self, reader):
+        for sample in reader.read():
+            if sample.id == int(self.my_id):
+                print(f'Goal message received: x={sample.x_goal}, y={sample.y_goal}, theta={sample.theta_goal}')
+                goal_msg = Pose2D()
+                goal_msg.x = sample.x_goal
+                goal_msg.y = sample.y_goal
+                goal_msg.theta = sample.theta_goal
+                self.goal_pub.publish(goal_msg)
+
 def hash_id(robot_id):
     """
     Hashes the given robot ID using SHA-256 algorithm.
@@ -648,16 +682,21 @@ class EntryExitCommunication:
         self.init_writer = DataWriter(self.publisher, self.init_topic)
         self.location_writer = DataWriter(self.publisher, self.location_topic)
 
+        # ROS publisher for publishing external goals
+        self.goal_pub = rospy.Publisher('/external_goal', Pose2D, queue_size=10)
+
         self.entry_exit_listener = EntryExitListener(self.participant, self.publisher, self.subscriber, self.my_id, self.my_ip, self.my_hash, self.init_writer)
         self.heartbeat_listener = HeartbeatListener(self.my_id)
         self.init_listener = InitializationListener(self.my_id, self.map_publisher, self.map_md_publisher)
         self.location_listener = LocationListener(self.my_id)
+        self.goal_listener = GoalListener(self.my_id, self.goal_pub)
 
         # We will start the readers later when it is necessary
         self.enter_exit_reader = None
         self.init_reader = None
         self.heartbeat_reader = None
         self.location_readers = dict()
+        self.goal_readers = dict()
 
         # Built-in reader to detect number of participants
         self.built_in_reader = BuiltinDataReader(self.participant, BuiltinTopicDcpsParticipant)
@@ -672,6 +711,8 @@ class EntryExitCommunication:
 
         # ROS publisher for publishing nearby agents locations
         self.agent_locations_publisher = rospy.Publisher('agent_locations', AgentLocationsArray, queue_size=10)
+
+        
 
     def hash_id(self, robot_id):
         """
@@ -951,6 +992,15 @@ class EntryExitCommunication:
                     self.agents, self.exited_agents, self.lost_agents = self.entry_exit_listener.get_agents()
                 current_agents_list = list(self.agents.keys())
 
+                # Add/Remove Goal Readers as necessary
+                for agent_id in self.agents.keys():
+                    if agent_id not in self.goal_readers and self.agents[agent_id]['agent_type'] == 'human':
+                        goal_topic = Topic(self.participant, 'RobotGoalTopic' + str(agent_id), RobotGoal)
+                        self.goal_readers[agent_id] = DataReader(self.subscriber, goal_topic, listener=self.goal_listener)
+                for agent_id in self.exited_agents.keys():
+                    if agent_id in self.goal_readers:
+                        self.goal_readers.pop(agent_id)
+
                 self.heartbeat_listener.update_agents(self.agents)
 
                 # Send out heartbeat
@@ -1005,6 +1055,8 @@ class EntryExitCommunication:
                 # Remove Dead Agents
                 for agent_id in dead_agents:
                     self.lost_agents[agent_id] = self.agents.pop(agent_id)
+                    if self.lost_agents[agent_id]['agent_type'] == 'human':
+                        self.goal_readers.pop(agent_id)
                 if dead_agents:
                     self.entry_exit_listener.update_agents(agents=self.agents, lost_agents=self.lost_agents)
 
