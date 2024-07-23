@@ -940,7 +940,7 @@ class EntryExitCommunication:
                 theta = euler[2]
 
                 self.my_location = (x, y, theta)
-                print(f'Current position: ({self.x}, {self.y}, {self.theta})')
+                print(f'Current position: ({x}, {y}, {theta})')
                 location_valid = True
 
                 # Publish to this agent's location topic
@@ -982,6 +982,10 @@ class EntryExitCommunication:
 
             if len(agent_list):
                 self.agent_locations_publisher.publish(agent_locations_array)
+
+            # Publish map/map metadata periodically
+            self.map_publisher.publish(self.map_msg)
+            self.map_md_publisher.publish(self.map_md_msg)
                 
             # Now publish heartbeat periodically
             if current_time - last_time >= HEARTBEAT_PERIOD:
