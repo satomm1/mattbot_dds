@@ -347,7 +347,7 @@ class HeartbeatListener(Listener):
             if sample.agent_id == int(self.my_id):
                 continue
             
-            print(f'Heartbeat from agent {sample.agent_id} at time {sample.timestamp}')
+            # print(f'Heartbeat from agent {sample.agent_id} at time {sample.timestamp}')
             
             if sample.agent_id in self.agents:
                 self.heartbeats[sample.agent_id] = sample.timestamp
@@ -358,7 +358,8 @@ class HeartbeatListener(Listener):
                     self.locations[sample.agent_id] = None
                     
             else:
-                print(f'Heartbeat from Agent {sample.agent_id}, but is not in the environment')
+                pass
+                # print(f'Heartbeat from Agent {sample.agent_id}, but is not in the environment')
                 
 
     def get_heartbeats(self):
@@ -940,7 +941,7 @@ class EntryExitCommunication:
                 theta = euler[2]
 
                 self.my_location = (x, y, theta)
-                print(f'Current position: ({x}, {y}, {theta})')
+                # print(f'Current position: ({x}, {y}, {theta})')
                 location_valid = True
 
                 # Publish to this agent's location topic
