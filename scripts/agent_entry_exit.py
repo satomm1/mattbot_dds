@@ -237,10 +237,11 @@ class EntryExitListener(Listener):
         for agent_id, agent_info in self.agents.items():
             agent_hash = agent_info['hash']
 
-            distance = abs(agent_hash / num_agents - robot_hash / num_agents)
-            if distance < my_distance:
-                print("I am not the closest robot")
-                return False
+            if agent_hash != robot_hash:
+                distance = abs(agent_hash / num_agents - robot_hash / num_agents)
+                if distance < my_distance:
+                    print("I am not the closest robot")
+                    return False
 
         print('I will provide initial details to the new agent')
         return True
