@@ -715,77 +715,124 @@ class EntryExitCommunication:
             # We are the first participant, we are responsible for getting the map
             print('I am the first agent to enter the environment')
 
-            map_query = """ 
-                            {
-                                map {
-                                    width
-                                    height
-                                    origin_x
-                                    origin_y
-                                    origin_z
-                                    origin_orientation_x
-                                    origin_orientation_y
-                                    origin_orientation_z
-                                    origin_orientation_w
-                                    resolution
-                                    occupancy
-                                }
-                            }
-                        """
-            have_map = False
-            while not have_map:  # Retry until we are able to get the map
-                try:
-                    # Get the map from the GraphQL server
-                    response = requests.post(self.graphql_server, json={'query': map_query}, timeout=1)
-                    if response.status_code == 200:
-                        data = response.json()
-                        map_data = data.get('data', {}).get('map', {})
+            # find mattbot_mcl package path
+            rospack = rospkg.RosPack()
+            package_path = rospack.get_path('mattbot_mcl')
+
+            # load the map from the current_map.json file
+            with open(os.path.join(package_path, 'map_json', 'current_map.json'), 'r') as f:
+                data = json.load(f)
+            map_data = data.get('data', {}).get('map', {})
+
+            self.map_msg.header.frame_id = 'map'
+            self.map_msg.info.width = map_data.get('width')
+            self.map_msg.info.height = map_data.get('height')
+            self.map_msg.info.resolution = map_data.get('resolution')
+            self.map_msg.info.origin.position.x = map_data.get('origin_x')
+            self.map_msg.info.origin.position.y = map_data.get('origin_y')
+            self.map_msg.info.origin.position.z = map_data.get('origin_z')
+            self.map_msg.info.origin.orientation.x = map_data.get('origin_orientation_x')
+            self.map_msg.info.origin.orientation.y = map_data.get('origin_orientation_y')
+            self.map_msg.info.origin.orientation.z = map_data.get('origin_orientation_z')
+            self.map_msg.info.origin.orientation.w = map_data.get('origin_orientation_w')
+            self.map_msg.data = map_data.get('occupancy')
+
+            self.map_md_msg.map_load_time = rospy.Time.now()
+            self.map_md_msg.resolution = map_data.get('resolution')
+            self.map_md_msg.width = map_data.get('width')
+            self.map_md_msg.height = map_data.get('height')
+            self.map_md_msg.origin.position.x = map_data.get('origin_x')
+            self.map_md_msg.origin.position.y = map_data.get('origin_y')
+            self.map_md_msg.origin.position.z = map_data.get('origin_z')
+            self.map_md_msg.origin.orientation.x = map_data.get('origin_orientation_x')
+            self.map_md_msg.origin.orientation.y = map_data.get('origin_orientation_y')
+            self.map_md_msg.origin.orientation.z = map_data.get('origin_orientation_z')
+            self.map_md_msg.origin.orientation.w = map_data.get('origin_orientation_w')
+            
+            self.entry_exit_listener.update_map(self.map_msg, self.map_md_msg)
+
+            # Publish the map and map metadata for ROS nodes
+            self.map_publisher.publish(self.map_msg)
+            self.map_md_publisher.publish(self.map_md_msg)
+
+            print("Map retrieved from saved file")
+
+            # Start the readers now that we have the map
+            self.enter_exit_reader = DataReader(self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener)
+            self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener)
+            self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener)
+            
+            # map_query = """ 
+            #                 {
+            #                     map {
+            #                         width
+            #                         height
+            #                         origin_x
+            #                         origin_y
+            #                         origin_z
+            #                         origin_orientation_x
+            #                         origin_orientation_y
+            #                         origin_orientation_z
+            #                         origin_orientation_w
+            #                         resolution
+            #                         occupancy
+            #                     }
+            #                 }
+            #             """
+            # have_map = False
+            # while not have_map:  # Retry until we are able to get the map
+            #     try:
+            #         # Get the map from the GraphQL server
+            #         response = requests.post(self.graphql_server, json={'query': map_query}, timeout=1)
+            #         if response.status_code == 200:
+            #             data = response.json()
+            #             map_data = data.get('data', {}).get('map', {})
                     
-                        have_map = True
+            #             have_map = True
 
-                        # Convert the strings into the ROS Occupancy grid
-                        self.map_msg.header.frame_id = 'map'
-                        self.map_msg.info.width = map_data.get('width')
-                        self.map_msg.info.height = map_data.get('height')
-                        self.map_msg.info.resolution = map_data.get('resolution')
-                        self.map_msg.info.origin.position.x = map_data.get('origin_x')
-                        self.map_msg.info.origin.position.y = map_data.get('origin_y')
-                        self.map_msg.info.origin.position.z = map_data.get('origin_z')
-                        self.map_msg.info.origin.orientation.x = map_data.get('origin_orientation_x')
-                        self.map_msg.info.origin.orientation.y = map_data.get('origin_orientation_y')
-                        self.map_msg.info.origin.orientation.z = map_data.get('origin_orientation_z')
-                        self.map_msg.info.origin.orientation.w = map_data.get('origin_orientation_w')
-                        self.map_msg.data = map_data.get('occupancy')
+            #             # Convert the strings into the ROS Occupancy grid
+            #             self.map_msg.header.frame_id = 'map'
+            #             self.map_msg.info.width = map_data.get('width')
+            #             self.map_msg.info.height = map_data.get('height')
+            #             self.map_msg.info.resolution = map_data.get('resolution')
+            #             self.map_msg.info.origin.position.x = map_data.get('origin_x')
+            #             self.map_msg.info.origin.position.y = map_data.get('origin_y')
+            #             self.map_msg.info.origin.position.z = map_data.get('origin_z')
+            #             self.map_msg.info.origin.orientation.x = map_data.get('origin_orientation_x')
+            #             self.map_msg.info.origin.orientation.y = map_data.get('origin_orientation_y')
+            #             self.map_msg.info.origin.orientation.z = map_data.get('origin_orientation_z')
+            #             self.map_msg.info.origin.orientation.w = map_data.get('origin_orientation_w')
+            #             self.map_msg.data = map_data.get('occupancy')
 
-                        self.map_md_msg.map_load_time = rospy.Time.now()
-                        self.map_md_msg.resolution = map_data.get('resolution')
-                        self.map_md_msg.width = map_data.get('width')
-                        self.map_md_msg.height = map_data.get('height')
-                        self.map_md_msg.origin.position.x = map_data.get('origin_x')
-                        self.map_md_msg.origin.position.y = map_data.get('origin_y')
-                        self.map_md_msg.origin.position.z = map_data.get('origin_z')
-                        self.map_md_msg.origin.orientation.x = map_data.get('origin_orientation_x')
-                        self.map_md_msg.origin.orientation.y = map_data.get('origin_orientation_y')
-                        self.map_md_msg.origin.orientation.z = map_data.get('origin_orientation_z')
-                        self.map_md_msg.origin.orientation.w = map_data.get('origin_orientation_w')
+            #             self.map_md_msg.map_load_time = rospy.Time.now()
+            #             self.map_md_msg.resolution = map_data.get('resolution')
+            #             self.map_md_msg.width = map_data.get('width')
+            #             self.map_md_msg.height = map_data.get('height')
+            #             self.map_md_msg.origin.position.x = map_data.get('origin_x')
+            #             self.map_md_msg.origin.position.y = map_data.get('origin_y')
+            #             self.map_md_msg.origin.position.z = map_data.get('origin_z')
+            #             self.map_md_msg.origin.orientation.x = map_data.get('origin_orientation_x')
+            #             self.map_md_msg.origin.orientation.y = map_data.get('origin_orientation_y')
+            #             self.map_md_msg.origin.orientation.z = map_data.get('origin_orientation_z')
+            #             self.map_md_msg.origin.orientation.w = map_data.get('origin_orientation_w')
 
-                        self.entry_exit_listener.update_map(self.map_msg, self.map_md_msg)
+            #             self.entry_exit_listener.update_map(self.map_msg, self.map_md_msg)
 
-                        # Publish the map and map metadata for ROS nodes
-                        self.map_publisher.publish(self.map_msg)
-                        self.map_md_publisher.publish(self.map_md_msg)
+            #             # Publish the map and map metadata for ROS nodes
+            #             self.map_publisher.publish(self.map_msg)
+            #             self.map_md_publisher.publish(self.map_md_msg)
 
-                        print("Map retrieved from GraphQL Server")
+            #             print("Map retrieved from GraphQL Server")
 
-                        # Start the readers now that we have the map
-                        self.enter_exit_reader = DataReader(self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener)
-                        self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener)
-                        self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener)
-                    else:
-                        print(f"Error retrieving map: {response.status_code}")
-                except Exception as e:
-                    print(f"Error retrieving map: {e}")
-                time.sleep(1)
+            #             # Start the readers now that we have the map
+            #             self.enter_exit_reader = DataReader(self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener)
+            #             self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener)
+            #             self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener)
+            #         else:
+            #             print(f"Error retrieving map: {response.status_code}")
+            #     except Exception as e:
+            #         print(f"Error retrieving map: {e}")
+            #     time.sleep(1)
         else:
             # We are not the first participant, we will get the map from one of the other agents
             print('I am not the first agent to enter the environment')
