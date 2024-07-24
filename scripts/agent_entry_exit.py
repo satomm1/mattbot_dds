@@ -1012,7 +1012,7 @@ class EntryExitCommunication:
                 # Remove Dead Agents
                 for agent_id in dead_agents:
                     self.lost_agents[agent_id] = self.agents.pop(agent_id)
-                    if self.lost_agents[agent_id]['agent_type'] == 'human':
+                    if self.lost_agents[agent_id]['agent_type'] == 'human' and agent_id in self.goal_readers:
                         self.goal_readers.pop(agent_id)
                 if dead_agents:
                     self.entry_exit_listener.update_agents(agents=self.agents, lost_agents=self.lost_agents)
