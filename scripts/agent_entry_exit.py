@@ -301,7 +301,7 @@ class EntryExitListener(Listener):
         if lost_agents is not None:
             self.lost_agents = lost_agents
     
-    def update_map(self, map, map_md):
+    def update_map(self, my_map, map_md):
         """
         Updates the occupancy grid map and map metadata.
 
@@ -312,7 +312,7 @@ class EntryExitListener(Listener):
         Returns:
         - None
         """
-        self.map_msg = map
+        self.map_msg = my_map
         self.map_md_msg = map_md
 
 class HeartbeatListener(Listener):
@@ -898,6 +898,9 @@ class EntryExitCommunication:
             # Store the map, map metadata, and agents
             self.map_msg, self.map_md_msg = self.init_listener.get_map()
             self.agents = self.init_listener.get_agents()
+
+            # Update the entry/exit listener with the map
+            self.entry_exit_listener.update_map(self.map_msg, self.map_md_msg)
 
             # Update the agents in the entry/exit listener
             self.entry_exit_listener.update_agents(agents=self.agents)
