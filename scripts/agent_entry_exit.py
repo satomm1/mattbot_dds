@@ -180,30 +180,30 @@ class EntryExitListener(Listener):
         - None
         """
         for sample in reader.read():
-            # print(sample)
 
             if sample.agent_id == int(self.my_id):
+                # Ignore messages from self
                 continue
 
-            # Determine what type of message was received
+            # Determine if entry or exit message
             if sample.action == 'enter':
-                print(f'Agent {sample.agent_id} entered the environment')
-                agent_type = sample.agent_type
-                capabilities = sample.capabilities
-                message_types = sample.message_types
-                ip_address = sample.ip_address
+                print(f'Agent {sample.agent_id} of type \'{sample.agent_type}\' entered the environment')
+
+                # Add new agent to agents dictionary
                 new_robot_hash = hash_id(str(sample.agent_id))
-                am_closest_robot = self.find_if_closest_robot(new_robot_hash)
                 self.agents[sample.agent_id] = {
-                    'agent_type': agent_type,
-                    'capabilities': capabilities,
-                    'message_types': message_types,
-                    'ip_address': ip_address,
+                    'agent_type': sample.agent_type,
+                    'capabilities': sample.capabilities,
+                    'message_types': sample.message_types,
+                    'ip_address': sample.ip_address,
                     'hash': new_robot_hash,
                     'timestamp': sample.timestamp
                 }  
                 self.update_to_agents = True
-                if am_closest_robot:
+
+                # If the new agent is the closest robot, send an initialization message
+                # The initalization message contains the map, map metadata, and all agents in the environment
+                if self.find_if_closest_robot(new_robot_hash):
                     my_dict = {
                         'id': int(self.my_id),
                         'agent_type': AGENT_TYPE,
@@ -248,19 +248,20 @@ class EntryExitListener(Listener):
         Returns:
         - bool: True if the given robot is the closest robot, False otherwise.
         """
-        num_agents = len(self.agents) + 1
+        num_agents = len(self.agents) + 1  # Add 1 since self.agents doesn't contain me
         my_distance = abs(self.my_hash / num_agents - robot_hash / num_agents)
 
+        # Loop through all agents to see if there is a closer robot (by hash)
         for agent_id, agent_info in self.agents.items():
             agent_hash = agent_info['hash']
 
             if agent_hash != robot_hash:
                 distance = abs(agent_hash / num_agents - robot_hash / num_agents)
                 if distance < my_distance:
-                    print("I am not the closest robot")
+                    # I am not the closest robot
                     return False
 
-        print('I will provide initial details to the new agent')
+        # I am the closest robot
         return True
 
     def agent_update_available(self):
@@ -321,6 +322,7 @@ class HeartbeatListener(Listener):
 
     Attributes:
         heartbeats (dict): A dictionary to store the heartbeats of agents.
+        locations (dict): A dictionary to store the locations of agents.
         my_id (int): The ID of the current agent.
         agents (dict): A dictionary to store information about all agents in the environment.
     """
@@ -345,10 +347,10 @@ class HeartbeatListener(Listener):
         for sample in reader.read():
 
             if sample.agent_id == int(self.my_id):
+                # Ignore messages from self
                 continue
             
-            # print(f'Heartbeat from agent {sample.agent_id} at time {sample.timestamp}')
-            
+            # Only process heartbeats from agents that are in the agents dictionary
             if sample.agent_id in self.agents:
                 self.heartbeats[sample.agent_id] = sample.timestamp
 
@@ -356,12 +358,7 @@ class HeartbeatListener(Listener):
                     self.locations[sample.agent_id] = (sample.x, sample.y, sample.theta)
                 else:
                     self.locations[sample.agent_id] = None
-                    
-            else:
-                pass
-                # print(f'Heartbeat from Agent {sample.agent_id}, but is not in the environment')
                 
-
     def get_heartbeats(self):
         """
         Get a copy of the heartbeats dictionary.
@@ -401,6 +398,8 @@ class HeartbeatListener(Listener):
             if agent_id not in self.agents:
                 self.heartbeats.pop(agent_id)
 
+    # TODO Should provide function to alert of new agents detected through heartbeats
+
 class InitializationListener(Listener):
     """
     Listener class for handling initialization messages.
@@ -435,15 +434,18 @@ class InitializationListener(Listener):
         for sample in init_reader.read():
 
             sending_agent_dict = json.loads(sample.sending_agent)
-            print(f'Initialization message received from agent {sending_agent_dict["id"]}')
+
+            # Ignore messages from self
             if sending_agent_dict['id'] == int(self.my_id):
                 continue
 
+            # Ignore messages not intended for this agent
             if sample.target_agent != int(self.my_id):
                 continue
 
             print(f'Initialization message received from agent {sending_agent_dict["id"]}')
 
+            # Add the sending agent to the agents dictionary
             self.agents[sending_agent_dict['id']] = {
                 'agent_type': sending_agent_dict['agent_type'],
                 'capabilities': sending_agent_dict['capabilities'],
@@ -453,6 +455,7 @@ class InitializationListener(Listener):
                 'timestamp': sending_agent_dict['timestamp']
             }
 
+            # Load the agents from the initialization message
             agent_dict = json.loads(sample.agents)
             if len(agent_dict) > 0:
                 # Cycle through agents in the initialization message and insert into our agents dictionary
@@ -576,11 +579,12 @@ class LocationListener(Listener):
             None
         """
         for sample in reader.read():
+
+            # Ignore messages from self
             if sample.agent_id == int(self.my_id):
                 continue
             
             if sample.agent_id in self.agent_ids:
-                print(f'Location message from agent {sample.agent_id} at time {sample.timestamp}')
                 self.locations[sample.agent_id] = (sample.x, sample.y, sample.theta)
 
     def get_locations(self):
@@ -609,6 +613,13 @@ class LocationListener(Listener):
                 self.locations.pop(agent_id)
 
 class GoalListener(Listener):
+    """
+    Listener class for receiving goal messages and publishing them.
+
+    Attributes:
+        my_id (int): The ID of the listener.
+        goal_pub (Publisher): The publisher for goal messages.
+    """
 
     def __init__(self, my_id, goal_pub):
         super().__init__()
@@ -616,6 +627,15 @@ class GoalListener(Listener):
         self.goal_pub = goal_pub
 
     def on_data_available(self, reader):
+        """
+        Callback method called when data is available.
+
+        Args:
+            reader (DataReader): The data reader object.
+
+        Returns:
+            None
+        """
         for sample in reader.read():
             if sample.id == int(self.my_id):
                 print(f'Goal message received: x={sample.x_goal}, y={sample.y_goal}, theta={sample.theta_goal}')
@@ -712,7 +732,6 @@ class EntryExitCommunication:
 
         # ROS publisher for publishing nearby agents locations
         self.agent_locations_publisher = rospy.Publisher('agent_locations', AgentLocationsArray, queue_size=10)
-
         
 
     def hash_id(self, robot_id):
@@ -804,77 +823,6 @@ class EntryExitCommunication:
             self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener)
             self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener)
             
-            # map_query = """ 
-            #                 {
-            #                     map {
-            #                         width
-            #                         height
-            #                         origin_x
-            #                         origin_y
-            #                         origin_z
-            #                         origin_orientation_x
-            #                         origin_orientation_y
-            #                         origin_orientation_z
-            #                         origin_orientation_w
-            #                         resolution
-            #                         occupancy
-            #                     }
-            #                 }
-            #             """
-            # have_map = False
-            # while not have_map:  # Retry until we are able to get the map
-            #     try:
-            #         # Get the map from the GraphQL server
-            #         response = requests.post(self.graphql_server, json={'query': map_query}, timeout=1)
-            #         if response.status_code == 200:
-            #             data = response.json()
-            #             map_data = data.get('data', {}).get('map', {})
-                    
-            #             have_map = True
-
-            #             # Convert the strings into the ROS Occupancy grid
-            #             self.map_msg.header.frame_id = 'map'
-            #             self.map_msg.info.width = map_data.get('width')
-            #             self.map_msg.info.height = map_data.get('height')
-            #             self.map_msg.info.resolution = map_data.get('resolution')
-            #             self.map_msg.info.origin.position.x = map_data.get('origin_x')
-            #             self.map_msg.info.origin.position.y = map_data.get('origin_y')
-            #             self.map_msg.info.origin.position.z = map_data.get('origin_z')
-            #             self.map_msg.info.origin.orientation.x = map_data.get('origin_orientation_x')
-            #             self.map_msg.info.origin.orientation.y = map_data.get('origin_orientation_y')
-            #             self.map_msg.info.origin.orientation.z = map_data.get('origin_orientation_z')
-            #             self.map_msg.info.origin.orientation.w = map_data.get('origin_orientation_w')
-            #             self.map_msg.data = map_data.get('occupancy')
-
-            #             self.map_md_msg.map_load_time = rospy.Time.now()
-            #             self.map_md_msg.resolution = map_data.get('resolution')
-            #             self.map_md_msg.width = map_data.get('width')
-            #             self.map_md_msg.height = map_data.get('height')
-            #             self.map_md_msg.origin.position.x = map_data.get('origin_x')
-            #             self.map_md_msg.origin.position.y = map_data.get('origin_y')
-            #             self.map_md_msg.origin.position.z = map_data.get('origin_z')
-            #             self.map_md_msg.origin.orientation.x = map_data.get('origin_orientation_x')
-            #             self.map_md_msg.origin.orientation.y = map_data.get('origin_orientation_y')
-            #             self.map_md_msg.origin.orientation.z = map_data.get('origin_orientation_z')
-            #             self.map_md_msg.origin.orientation.w = map_data.get('origin_orientation_w')
-
-            #             self.entry_exit_listener.update_map(self.map_msg, self.map_md_msg)
-
-            #             # Publish the map and map metadata for ROS nodes
-            #             self.map_publisher.publish(self.map_msg)
-            #             self.map_md_publisher.publish(self.map_md_msg)
-
-            #             print("Map retrieved from GraphQL Server")
-
-            #             # Start the readers now that we have the map
-            #             self.enter_exit_reader = DataReader(self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener)
-            #             self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener)
-            #             self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener)
-            #         else:
-            #             print(f"Error retrieving map: {response.status_code}")
-            #     except Exception as e:
-            #         print(f"Error retrieving map: {e}")
-            #     time.sleep(1)
         else:
             # We are not the first participant, we will get the map from one of the other agents
             print('I am not the first agent to enter the environment')
@@ -928,11 +876,12 @@ class EntryExitCommunication:
 
         prev_nearby_agents = []
 
-        # Loop through at the rate we publish location
+        # Loop through at the rate we wish to publish location
         rate = rospy.Rate(LOCATION_FREQUENCY)
         last_time = int(time.time())
         while not rospy.is_shutdown():
-            current_time = int(time.time())
+
+            current_time = int(time.time())  # Get the current time
 
             # Get current position of the agent and publish to location topic
             location_valid = False
@@ -944,7 +893,6 @@ class EntryExitCommunication:
                 theta = euler[2]
 
                 self.my_location = (x, y, theta)
-                # print(f'Current position: ({x}, {y}, {theta})')
                 location_valid = True
 
                 # Publish to this agent's location topic
@@ -952,7 +900,7 @@ class EntryExitCommunication:
                 self.location_writer.write(location_message)
 
             except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
-                # print("Location not available yet")
+                # Location not available yet (not yet localized)
                 x = 1
                 y = 2
                 theta = 3
@@ -961,7 +909,8 @@ class EntryExitCommunication:
                 location_message = Location(int(self.my_id), current_time, x, y, theta)
                 self.location_writer.write(location_message)
 
-            nearby_agents_locations = self.location_listener.get_locations()
+            # Collect received locations of nearby agents and publish them to a ROS topic
+            nearby_agents_locations = self.location_listener.get_locations()  
             agent_locations_array = AgentLocationsArray()
             agent_locations_array.header.stamp = rospy.Time.now()
             agent_locations_array.header.frame_id = 'map'
@@ -1024,6 +973,7 @@ class EntryExitCommunication:
                     if agent_id in current_agents_list:
                         self.agents[agent_id]['timestamp'] = timestamp
 
+                # Check for nearby agents
                 nearby_agents = set()
                 for agent_id, location in locations.items():
                     if location is not None and agent_id in current_agents_list:
@@ -1034,7 +984,6 @@ class EntryExitCommunication:
                         if self.my_location is not None:
                             distance = ((x - self.my_location[0])**2 + (y - self.my_location[1])**2)**0.5
                             if distance < DISTANCE_THRESHOLD:
-                                print(f'Agent {agent_id} is close to the robot')
                                 nearby_agents.add(agent_id)
                                 if 'agent_id' not in list(self.location_readers.keys()):
                                     new_location_topic = Topic(self.participant, 'LocationTopic' + str(agent_id), Location)
