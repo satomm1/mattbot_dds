@@ -1,5 +1,5 @@
 import rospy
-from nav_msgs.msg import OccupancyGrid, MapMetaData
+from nav_msgs.msg import OccupancyGrid, MapMetaData, Path
 from mattbot_dds.msg import AgentLocationsArray
 from geometry_msgs.msg import Pose, Pose2D
 from std_msgs.msg import Header, Int32
@@ -123,6 +123,13 @@ class RobotGoal(IdlStruct):
     x_goal: float
     y_goal: float
     theta_goal: float
+
+@dataclass
+class DataMessage(IdlStruct):
+    message_type: str
+    sending_agent: int
+    timestamp: int
+    data: str
 
 class EntryExitListener(Listener):
     """
@@ -637,6 +644,9 @@ class GoalListener(Listener):
             None
         """
         for sample in reader.read():
+
+            print("Received goal")
+
             if sample.id == int(self.my_id):
                 print(f'Goal message received: x={sample.x_goal}, y={sample.y_goal}, theta={sample.theta_goal}')
                 goal_msg = Pose2D()
@@ -661,6 +671,8 @@ def hash_id(robot_id):
 class EntryExitCommunication:
 
     def __init__(self, server_url='http://192.168.50.2:8000/graphql'):
+
+        rospy.init_node('agent_entry_exit', anonymous=True)
 
         # Get robot ID, Hash, and IP Address
         self.my_id = os.environ.get('ROBOT_ID')
@@ -696,12 +708,14 @@ class EntryExitCommunication:
         self.heartbeat_topic = Topic(self.participant, 'HeartbeatTopic', Heartbeat)
         self.init_topic = Topic(self.participant, 'InitializationTopic', Initialization)
         self.location_topic = Topic(self.participant, 'LocationTopic'+ str(self.my_id), Location)
+        self.data_topic = Topic(self.participant, 'DataTopic' + str(self.my_id), DataMessage)
 
         # Create the DataWriters and DataReaders
         self.enter_exit_writer = DataWriter(self.publisher, self.entry_exit_topic)
         self.heartbeat_writer = DataWriter(self.publisher, self.heartbeat_topic)
         self.init_writer = DataWriter(self.publisher, self.init_topic)
         self.location_writer = DataWriter(self.publisher, self.location_topic)
+        self.data_writer = DataWriter(self.publisher, self.data_topic)
 
         # ROS publisher for publishing external goals
         self.goal_pub = rospy.Publisher('/external_goal', Pose2D, queue_size=10)
@@ -864,6 +878,9 @@ class EntryExitCommunication:
 
             print("Initialization complete")
 
+        # Subscribe to the path topic
+        rospy.Subscriber('/cmd_smoothed_path', Path, self.path_callback)
+
     def run(self):
         """
         Executes the main loop of the agent_entry_exit node.
@@ -1018,6 +1035,21 @@ class EntryExitCommunication:
                     self.entry_exit_listener.update_agents(agents=self.agents, lost_agents=self.lost_agents)
 
             rate.sleep()
+            
+    def path_callback(self, path):
+        """
+        Callback function for receiving a path message from the path planner.
+
+        Args:
+            path (Path): The path message received from the path planner.
+        """        
+        # Convert path to dictionary
+        path_dict = message_converter.convert_ros_message_to_dictionary(path)
+        path_json = json.dumps(path_dict)
+
+        timestamp = int(time.time())
+        my_message = DataMessage('path', int(self.my_id), timestamp, path_json)
+        self.data_writer.write(my_message)
 
     def shutdown(self):
         print('Shutting down...')
@@ -1028,7 +1060,6 @@ class EntryExitCommunication:
 
 if __name__ == '__main__':
 
-    rospy.init_node('agent_entry_exit', anonymous=True)
     entry_exit_obj = EntryExitCommunication()
     rospy.on_shutdown(entry_exit_obj.shutdown)
     entry_exit_obj.setup_and_run()
