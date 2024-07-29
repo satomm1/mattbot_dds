@@ -109,22 +109,6 @@ class Location(IdlStruct):
     theta: float
 
 @dataclass
-class RobotGoal(IdlStruct):
-    """
-    Represents the goal of a robot.
-
-    Attributes:
-        id (int): The ID of the robot.
-        x_goal (float): The x-coordinate of the goal.
-        y_goal (float): The y-coordinate of the goal.
-        theta_goal (float): The orientation of the goal.
-    """
-    id: int
-    x_goal: float
-    y_goal: float
-    theta_goal: float
-
-@dataclass
 class DataMessage(IdlStruct):
     message_type: str
     sending_agent: int
@@ -619,41 +603,39 @@ class LocationListener(Listener):
             if agent_id not in agent_ids:
                 self.locations.pop(agent_id)
 
-class GoalListener(Listener):
-    """
-    Listener class for receiving goal messages and publishing them.
+class DataListener(Listener):
 
-    Attributes:
-        my_id (int): The ID of the listener.
-        goal_pub (Publisher): The publisher for goal messages.
-    """
-
-    def __init__(self, my_id, goal_pub):
+    def __init__(self, my_id, topic_id, goal_pub=None):
         super().__init__()
         self.my_id = my_id
+        self.topic_id = topic_id
         self.goal_pub = goal_pub
 
     def on_data_available(self, reader):
-        """
-        Callback method called when data is available.
-
-        Args:
-            reader (DataReader): The data reader object.
-
-        Returns:
-            None
-        """
         for sample in reader.read():
+            
+            sending_agent = sample.sending_agent
+            if sending_agent == int(self.my_id):
+                continue
 
-            print("Received goal")
+            message_type = sample.message_type
+            timestamp = sample.timestamp
+            data = json.loads(sample.data)
 
-            if sample.id == int(self.my_id):
-                print(f'Goal message received: x={sample.x_goal}, y={sample.y_goal}, theta={sample.theta_goal}')
-                goal_msg = Pose2D()
-                goal_msg.x = sample.x_goal
-                goal_msg.y = sample.y_goal
-                goal_msg.theta = sample.theta_goal
-                self.goal_pub.publish(goal_msg)
+            if self.topic_id == self.my_id:  # This is my topic
+                # Process the message
+                if message_type == "goal":
+                    print(f"Received goal message from agent {sending_agent}: x={data['x']}, y={data['y']}, theta={data['theta']}")
+                    goal_msg = Pose2D()
+                    goal_msg.x = data['x']
+                    goal_msg.y = data['y']
+                    goal_msg.theta = data['theta']
+                    self.goal_pub.publish(goal_msg)
+            else:  # We are listening to another agent's topic
+                pass
+            
+
+            # if message_type == 
 
 def hash_id(robot_id):
     """
@@ -724,14 +706,16 @@ class EntryExitCommunication:
         self.heartbeat_listener = HeartbeatListener(self.my_id)
         self.init_listener = InitializationListener(self.my_id, self.map_publisher, self.map_md_publisher)
         self.location_listener = LocationListener(self.my_id)
-        self.goal_listener = GoalListener(self.my_id, self.goal_pub)
+        self.my_data_listener = DataListener(self.my_id, self.my_id, self.goal_pub)
+        self.agent_data_listeners = dict()
 
         # We will start the readers later when it is necessary
         self.enter_exit_reader = None
         self.init_reader = None
         self.heartbeat_reader = None
         self.location_readers = dict()
-        self.goal_readers = dict()
+        self.my_data_reader = DataReader(self.subscriber, self.data_topic, listener=self.my_data_listener)
+        self.agent_data_readers = dict()
 
         # Built-in reader to detect number of participants
         self.built_in_reader = BuiltinDataReader(self.participant, BuiltinTopicDcpsParticipant)
@@ -966,15 +950,6 @@ class EntryExitCommunication:
                     self.agents, self.exited_agents, self.lost_agents = self.entry_exit_listener.get_agents()
                 current_agents_list = list(self.agents.keys())
 
-                # Add/Remove Goal Readers as necessary
-                for agent_id in self.agents.keys():
-                    if agent_id not in self.goal_readers and self.agents[agent_id]['agent_type'] == 'human':
-                        goal_topic = Topic(self.participant, 'RobotGoalTopic' + str(agent_id), RobotGoal)
-                        self.goal_readers[agent_id] = DataReader(self.subscriber, goal_topic, listener=self.goal_listener)
-                for agent_id in self.exited_agents.keys():
-                    if agent_id in self.goal_readers:
-                        self.goal_readers.pop(agent_id)
-
                 self.heartbeat_listener.update_agents(self.agents)
 
                 # Send out heartbeat
@@ -1029,8 +1004,6 @@ class EntryExitCommunication:
                 # Remove Dead Agents
                 for agent_id in dead_agents:
                     self.lost_agents[agent_id] = self.agents.pop(agent_id)
-                    if self.lost_agents[agent_id]['agent_type'] == 'human' and agent_id in self.goal_readers:
-                        self.goal_readers.pop(agent_id)
                 if dead_agents:
                     self.entry_exit_listener.update_agents(agents=self.agents, lost_agents=self.lost_agents)
 
