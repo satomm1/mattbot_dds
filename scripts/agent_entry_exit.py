@@ -680,6 +680,24 @@ class EntryExitCommunication:
         self.map_publisher = rospy.Publisher('map', OccupancyGrid, queue_size=10)
         self.map_md_publisher = rospy.Publisher('map_metadata', MapMetaData, queue_size=10)
 
+        # Create different policies for the DDS entities
+        self.reliable_qos = Qos(
+            policy=[
+                Policy.Reliability.Reliable(),
+                Policy.Durability.TransientLocal(),
+                Policy.History.KeepLast(1),
+                Policy.Reliability.MaxBlockingTime(duration(milliseconds=100))
+            ]
+        )
+
+        self.best_effort_qos = Qos(
+            policy=[
+                Policy.Reliability.BestEffort(),
+                Policy.Durability.TransientLocal(),
+                Policy.History.KeepLast(1)
+            ]
+        )
+
         # Create a DomainParticipant, Subscriber, and Publisher
         self.participant = DomainParticipant()
         self.subscriber = Subscriber(self.participant)
@@ -693,11 +711,11 @@ class EntryExitCommunication:
         self.data_topic = Topic(self.participant, 'DataTopic' + str(self.my_id), DataMessage)
 
         # Create the DataWriters and DataReaders
-        self.enter_exit_writer = DataWriter(self.publisher, self.entry_exit_topic)
-        self.heartbeat_writer = DataWriter(self.publisher, self.heartbeat_topic)
-        self.init_writer = DataWriter(self.publisher, self.init_topic)
-        self.location_writer = DataWriter(self.publisher, self.location_topic)
-        self.data_writer = DataWriter(self.publisher, self.data_topic)
+        self.enter_exit_writer = DataWriter(self.publisher, self.entry_exit_topic, qos=self.reliable_qos)
+        self.heartbeat_writer = DataWriter(self.publisher, self.heartbeat_topic, qos=self.best_effort_qos)
+        self.init_writer = DataWriter(self.publisher, self.init_topic, qos=self.reliable_qos)
+        self.location_writer = DataWriter(self.publisher, self.location_topic, qos=self.best_effort_qos)
+        self.data_writer = DataWriter(self.publisher, self.data_topic, qos=self.reliable_qos)
 
         # ROS publisher for publishing external goals
         self.goal_pub = rospy.Publisher('/external_goal', Pose2D, queue_size=10)
@@ -714,7 +732,7 @@ class EntryExitCommunication:
         self.init_reader = None
         self.heartbeat_reader = None
         self.location_readers = dict()
-        self.my_data_reader = DataReader(self.subscriber, self.data_topic, listener=self.my_data_listener)
+        self.my_data_reader = DataReader(self.subscriber, self.data_topic, listener=self.my_data_listener, qos=self.reliable_qos)
         self.agent_data_readers = dict()
 
         # Built-in reader to detect number of participants
@@ -817,17 +835,17 @@ class EntryExitCommunication:
             print("Map retrieved from saved file")
 
             # Start the readers now that we have the map
-            self.enter_exit_reader = DataReader(self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener)
-            self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener)
-            self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener)
+            self.enter_exit_reader = DataReader(self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener, qos=self.reliable_qos)
+            self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener, qos=self.reliable_qos)
+            self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener, qos=self.best_effort_qos)
             
         else:
             # We are not the first participant, we will get the map from one of the other agents
             print('I am not the first agent to enter the environment')
 
             # We start the readers now since we will need them to access map information
-            self.enter_exit_reader = DataReader(self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener)
-            self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener)
+            self.enter_exit_reader = DataReader(self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener, qos=self.reliable_qos)
+            self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener, qos=self.reliable_qos)
 
             # Broadcast an entry message
             entry_message = EntryExit(int(self.my_id), AGENT_TYPE, 'enter', AGENT_CAPABILITIES, AGENT_MESSAGE_TYPES, self.my_ip, int(time.time()))
@@ -858,7 +876,7 @@ class EntryExitCommunication:
             # Start the heartbeat reader now that we have the map, stop listening for initialization messages
             self.init_reader = None
             self.init_listener = None
-            self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener)
+            self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener, qos=self.best_effort_qos)
 
             print("Initialization complete")
 
@@ -979,7 +997,7 @@ class EntryExitCommunication:
                                 nearby_agents.add(agent_id)
                                 if 'agent_id' not in list(self.location_readers.keys()):
                                     new_location_topic = Topic(self.participant, 'LocationTopic' + str(agent_id), Location)
-                                    self.location_readers[agent_id] = DataReader(self.subscriber, new_location_topic, listener=self.location_listener)
+                                    self.location_readers[agent_id] = DataReader(self.subscriber, new_location_topic, listener=self.location_listener, qos=self.best_effort_qos)
                 
                 # Only need to perform this housekeeping if the list of nearby agents has changed
                 if nearby_agents != prev_nearby_agents:
