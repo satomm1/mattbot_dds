@@ -913,13 +913,13 @@ class EntryExitCommunication:
 
             except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
                 # Location not available yet (not yet localized)
-                x = 1
-                y = 2
-                theta = 3
+                x = None
+                y = None
+                theta = None
                 self.my_location = (x, y, theta)
-                location_valid = True
-                location_message = Location(int(self.my_id), current_time, x, y, theta)
-                self.location_writer.write(location_message)
+                location_valid = False
+                # location_message = Location(int(self.my_id), current_time, x, y, theta)
+                # self.location_writer.write(location_message)
 
             # Collect received locations of nearby agents and publish them to a ROS topic
             nearby_agents_locations = self.location_listener.get_locations()  
