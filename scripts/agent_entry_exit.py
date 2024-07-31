@@ -633,9 +633,7 @@ class DataListener(Listener):
                     self.goal_pub.publish(goal_msg)
             else:  # We are listening to another agent's topic
                 pass
-            
-
-            # if message_type == 
+                
 
 def hash_id(robot_id):
     """
