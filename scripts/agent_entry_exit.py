@@ -912,19 +912,21 @@ class EntryExitCommunication:
             for agent_id in self.location_listeners.keys():
                 location = self.location_listeners[agent_id].get_location()
 
-                id_msg = Int32()
-                id_msg.data = int(agent_id)
-                agent_list.append(id_msg)   
-                agent_pose = Pose()
-                agent_pose.position.x = location[0]
-                agent_pose.position.y = location[1]
-                agent_pose.position.z = 0
-                quat = tf.transformations.quaternion_from_euler(0, 0, location[2])
-                agent_pose.orientation.x = quat[0]
-                agent_pose.orientation.y = quat[1]
-                agent_pose.orientation.z = quat[2]
-                agent_pose.orientation.w = quat[3]
-                agent_location_list.append(agent_pose)
+                if location is not None:
+
+                    id_msg = Int32()
+                    id_msg.data = int(agent_id)
+                    agent_list.append(id_msg)   
+                    agent_pose = Pose()
+                    agent_pose.position.x = location[0]
+                    agent_pose.position.y = location[1]
+                    agent_pose.position.z = 0
+                    quat = tf.transformations.quaternion_from_euler(0, 0, location[2])
+                    agent_pose.orientation.x = quat[0]
+                    agent_pose.orientation.y = quat[1]
+                    agent_pose.orientation.z = quat[2]
+                    agent_pose.orientation.w = quat[3]
+                    agent_location_list.append(agent_pose)
             agent_locations_array.agentIDs = agent_list
             agent_locations_array.locations = agent_location_list
 
