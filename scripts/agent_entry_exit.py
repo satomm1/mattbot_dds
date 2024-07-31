@@ -209,7 +209,7 @@ class EntryExitListener(Listener):
                     self.init_writer.write(init_message)
 
                     print(f'Sent initialization message to agent {sample.agent_id}')
-            elif sample.action == 'intialized':
+            elif sample.action == 'initialized':
                 print(f'Agent {sample.agent_id} of type \'{sample.agent_type}\' entered the environment')
 
                 # Agent initialized, add to agents dictionary
@@ -859,7 +859,7 @@ class EntryExitCommunication:
             self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener, qos=self.best_effort_qos)
 
             # Send confirmation message to entry_exit topic
-            entry_message = EntryExit(int(self.my_id), AGENT_TYPE, 'intialized', AGENT_CAPABILITIES, AGENT_MESSAGE_TYPES, self.my_ip, int(time.time()))
+            entry_message = EntryExit(int(self.my_id), AGENT_TYPE, 'initialized', AGENT_CAPABILITIES, AGENT_MESSAGE_TYPES, self.my_ip, int(time.time()))
             self.enter_exit_writer.write(entry_message)
 
             print("Initialization complete")
