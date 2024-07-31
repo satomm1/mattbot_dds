@@ -362,7 +362,7 @@ class HeartbeatListener(Listener):
         Returns:
             dict: A copy of the heartbeats dictionary.
         """
-        
+        returned_heartbeats = self.new_heartbeats.copy()
         return returned_heartbeats
     
     def get_heartbeats_and_locations(self):
