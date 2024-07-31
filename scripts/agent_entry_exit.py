@@ -614,6 +614,7 @@ class DataListener(Listener):
                     goal_msg.theta = data['theta']
                     self.goal_pub.publish(goal_msg)
             else:  # We are listening to another agent's topic
+                # TODO
                 pass
 
 
@@ -708,6 +709,7 @@ class EntryExitCommunication:
         self.location_readers = dict()
         self.location_listeners = dict()
         self.my_data_reader = DataReader(self.subscriber, self.data_topic, listener=self.my_data_listener, qos=self.reliable_qos)
+        self.agent_data_listeners = dict()
         self.agent_data_readers = dict()
 
         # Built-in reader to detect number of participants
@@ -978,6 +980,10 @@ class EntryExitCommunication:
                                     self.location_listeners[agent_id] = LocationListener(self.my_id)
                                     self.location_readers[agent_id] = DataReader(self.subscriber, new_location_topic, listener=self.location_listeners[agent_id], qos=self.best_effort_qos)
                 
+                                    new_data_topic = Topic(self.participant, 'DataTopic' + str(agent_id), DataMessage)
+                                    self.agent_data_listeners[agent_id] = DataListener(self.my_id, agent_id)
+                                    self.agent_data_readers[agent_id] = DataReader(self.subscriber, new_data_topic, listener=self.agent_data_listeners[agent_id], qos=self.reliable_qos)
+
                 # Only need to perform this housekeeping if the list of nearby agents has changed
                 if nearby_agents != prev_nearby_agents:
                     prev_nearby_agents = nearby_agents
@@ -989,6 +995,11 @@ class EntryExitCommunication:
                             self.location_readers[agent_id] = None
                             self.location_listeners.pop(agent_id)
                             self.location_readers.pop(agent_id)
+
+                            self.agent_data_listeners[agent_id] = None
+                            self.agent_data_readers[agent_id] = None
+                            self.agent_data_listeners.pop(agent_id)
+                            self.agent_data_readers.pop(agent_id)
 
                 # Check Periodically for Dead Agents
                 dead_agents = []
