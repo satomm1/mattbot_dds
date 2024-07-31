@@ -898,7 +898,7 @@ class EntryExitCommunication:
                 x = None
                 y = None
                 theta = None
-                self.my_location = (x, y, theta)
+                self.my_location = None
                 location_valid = False
                 # location_message = Location(int(self.my_id), current_time, x, y, theta)
                 # self.location_writer.write(location_message)
