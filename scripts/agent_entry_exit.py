@@ -178,23 +178,12 @@ class EntryExitListener(Listener):
 
             # Determine if entry or exit message
             if sample.action == 'enter':
-                print(f'Agent {sample.agent_id} of type \'{sample.agent_type}\' entered the environment')
-
-                # Add new agent to agents dictionary
                 new_robot_hash = hash_id(str(sample.agent_id))
-                self.agents[sample.agent_id] = {
-                    'agent_type': sample.agent_type,
-                    'capabilities': sample.capabilities,
-                    'message_types': sample.message_types,
-                    'ip_address': sample.ip_address,
-                    'hash': new_robot_hash,
-                    'timestamp': sample.timestamp
-                }  
-                self.update_to_agents = True
-
                 # If the new agent is the closest robot, send an initialization message
                 # The initalization message contains the map, map metadata, and all agents in the environment
                 if self.find_if_closest_robot(new_robot_hash):
+                    print(f'Agent {sample.agent_id} of type \'{sample.agent_type}\' is requesting entry')
+
                     my_dict = {
                         'id': int(self.my_id),
                         'agent_type': AGENT_TYPE,
@@ -219,7 +208,21 @@ class EntryExitListener(Listener):
                     init_message = Initialization(target_agent=sample.agent_id, sending_agent=sending_agent, agents=agents_message, map=map_json, map_md=map_md_json)
                     self.init_writer.write(init_message)
 
-                    print("Sent initialization message to new agent")
+                    print(f'Sent initialization message to agent {sample.agent_id}')
+            elif sample.action == 'intialized':
+                print(f'Agent {sample.agent_id} of type \'{sample.agent_type}\' entered the environment')
+
+                # Agent initialized, add to agents dictionary
+                new_robot_hash = hash_id(str(sample.agent_id))
+                self.agents[sample.agent_id] = {
+                    'agent_type': sample.agent_type,
+                    'capabilities': sample.capabilities,
+                    'message_types': sample.message_types,
+                    'ip_address': sample.ip_address,
+                    'hash': new_robot_hash,
+                    'timestamp': sample.timestamp
+                }  
+                self.update_to_agents = True
             elif sample.action == 'exit':
                 # Agent Exited, remove from agents dictionary
                 if sample.agent_id in self.agents:
@@ -854,6 +857,10 @@ class EntryExitCommunication:
             self.init_reader = None
             self.init_listener = None
             self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener, qos=self.best_effort_qos)
+
+            # Send confirmation message to entry_exit topic
+            entry_message = EntryExit(int(self.my_id), AGENT_TYPE, 'intialized', AGENT_CAPABILITIES, AGENT_MESSAGE_TYPES, self.my_ip, int(time.time()))
+            self.enter_exit_writer.write(entry_message)
 
             print("Initialization complete")
 
