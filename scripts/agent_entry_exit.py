@@ -633,7 +633,7 @@ class DataListener(Listener):
                     self.goal_pub.publish(goal_msg)
             else:  # We are listening to another agent's topic
                 pass
-                
+
 
 def hash_id(robot_id):
     """
@@ -680,20 +680,15 @@ class EntryExitCommunication:
 
         # Create different policies for the DDS entities
         self.reliable_qos = Qos(
-            policy=[
-                Policy.Reliability.Reliable(),
-                Policy.Durability.TransientLocal(),
-                Policy.History.KeepLast(1),
-                Policy.Reliability.MaxBlockingTime(duration(milliseconds=100))
-            ]
+            Policy.Reliability.Reliable(max_blocking_time=duration(milliseconds=1)),
+            Policy.Durability.TransientLocal,
+            Policy.History.KeepLast(depth=1)
         )
 
         self.best_effort_qos = Qos(
-            policy=[
-                Policy.Reliability.BestEffort(),
-                Policy.Durability.TransientLocal(),
-                Policy.History.KeepLast(1)
-            ]
+            Policy.Reliability.BestEffort,
+            Policy.Durability.TransientLocal,
+            Policy.History.KeepLast(depth=1)
         )
 
         # Create a DomainParticipant, Subscriber, and Publisher
