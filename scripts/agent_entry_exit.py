@@ -210,19 +210,22 @@ class EntryExitListener(Listener):
 
                     print(f'Sent initialization message to agent {sample.agent_id}')
             elif sample.action == 'initialized':
-                print(f'Agent {sample.agent_id} of type \'{sample.agent_type}\' entered the environment')
+                
+                # Only if the sample.timestamp is recent
+                if int(time.time()) - sample.timestamp < 5: 
+                    print(f'Agent {sample.agent_id} of type \'{sample.agent_type}\' entered the environment')
 
-                # Agent initialized, add to agents dictionary
-                new_robot_hash = hash_id(str(sample.agent_id))
-                self.agents[sample.agent_id] = {
-                    'agent_type': sample.agent_type,
-                    'capabilities': sample.capabilities,
-                    'message_types': sample.message_types,
-                    'ip_address': sample.ip_address,
-                    'hash': new_robot_hash,
-                    'timestamp': sample.timestamp
-                }  
-                self.update_to_agents = True
+                    # Agent initialized, add to agents dictionary
+                    new_robot_hash = hash_id(str(sample.agent_id))
+                    self.agents[sample.agent_id] = {
+                        'agent_type': sample.agent_type,
+                        'capabilities': sample.capabilities,
+                        'message_types': sample.message_types,
+                        'ip_address': sample.ip_address,
+                        'hash': new_robot_hash,
+                        'timestamp': sample.timestamp
+                    }  
+                    self.update_to_agents = True
             elif sample.action == 'exit':
                 # Agent Exited, remove from agents dictionary
                 if sample.agent_id in self.agents:
