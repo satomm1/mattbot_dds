@@ -545,19 +545,17 @@ class LocationListener(Listener):
     Attributes:
         my_id (int): The ID of the listener.
         agent_ids (list): List of agent IDs.
-        locations (dict): Dictionary to store agent locations.
+        location (tuple): Tuple to store agent location.
 
     Methods:
         on_data_available(reader): Callback method called when data is available.
-        get_locations(): Returns the locations dictionary.
-        set_agent_ids(agent_ids): Sets the agent IDs and updates the locations dictionary.
+        get_location(): Returns the location tuple.
     """
 
     def __init__(self, my_id):
         super().__init__()
         self.my_id = my_id
-        self.agent_ids = []
-        self.locations = dict()
+        self.location = None
 
     def on_data_available(self, reader):
         """
@@ -575,33 +573,17 @@ class LocationListener(Listener):
             if sample.agent_id == int(self.my_id):
                 continue
             
-            if sample.agent_id in self.agent_ids:
-                self.locations[sample.agent_id] = (sample.x, sample.y, sample.theta)
+            self.location = (sample.x, sample.y, sample.theta)
 
-    def get_locations(self):
+    def get_location(self):
         """
         Returns the locations dictionary.
 
         Returns:
-            dict: Dictionary containing agent locations.
+            dict: Tuple containing agent location.
         """
-        return self.locations
+        return self.location
 
-    def set_agent_ids(self, agent_ids):
-        """
-        Sets the agent IDs and updates the locations dictionary.
-
-        Args:
-            agent_ids (list): List of agent IDs.
-
-        Returns:
-            None
-        """
-        self.agent_ids = agent_ids
-        # pop all location values that are not in agent_ids
-        for agent_id in list(self.locations.keys()):
-            if agent_id not in agent_ids:
-                self.locations.pop(agent_id)
 
 class DataListener(Listener):
 
@@ -716,7 +698,6 @@ class EntryExitCommunication:
         self.entry_exit_listener = EntryExitListener(self.participant, self.publisher, self.subscriber, self.my_id, self.my_ip, self.my_hash, self.init_writer)
         self.heartbeat_listener = HeartbeatListener(self.my_id)
         self.init_listener = InitializationListener(self.my_id, self.map_publisher, self.map_md_publisher)
-        self.location_listener = LocationListener(self.my_id)
         self.my_data_listener = DataListener(self.my_id, self.my_id, self.goal_pub)
         self.agent_data_listeners = dict()
 
@@ -725,6 +706,7 @@ class EntryExitCommunication:
         self.init_reader = None
         self.heartbeat_reader = None
         self.location_readers = dict()
+        self.location_listeners = dict()
         self.my_data_reader = DataReader(self.subscriber, self.data_topic, listener=self.my_data_listener, qos=self.reliable_qos)
         self.agent_data_readers = dict()
 
@@ -922,13 +904,14 @@ class EntryExitCommunication:
                 # self.location_writer.write(location_message)
 
             # Collect received locations of nearby agents and publish them to a ROS topic
-            nearby_agents_locations = self.location_listener.get_locations()  
             agent_locations_array = AgentLocationsArray()
             agent_locations_array.header.stamp = rospy.Time.now()
             agent_locations_array.header.frame_id = 'map'
             agent_list = []
             agent_location_list = []
-            for agent_id, location in nearby_agents_locations.items():
+            for agent_id in self.location_listeners.keys():
+                location = self.location_listeners[agent_id].get_location()
+
                 id_msg = Int32()
                 id_msg.data = int(agent_id)
                 agent_list.append(id_msg)   
@@ -990,7 +973,8 @@ class EntryExitCommunication:
                                 nearby_agents.add(agent_id)
                                 if 'agent_id' not in list(self.location_readers.keys()):
                                     new_location_topic = Topic(self.participant, 'LocationTopic' + str(agent_id), Location)
-                                    self.location_readers[agent_id] = DataReader(self.subscriber, new_location_topic, listener=self.location_listener, qos=self.best_effort_qos)
+                                    self.location_listeners[agent_id] = LocationListener(self.my_id)
+                                    self.location_readers[agent_id] = DataReader(self.subscriber, new_location_topic, listener=self.location_listeners[agent_id], qos=self.best_effort_qos)
                 
                 # Only need to perform this housekeeping if the list of nearby agents has changed
                 if nearby_agents != prev_nearby_agents:
@@ -999,8 +983,10 @@ class EntryExitCommunication:
                     # Remove readers that are no longer needed
                     for agent_id in list(self.location_readers.keys()):
                         if agent_id not in nearby_agents:
+                            self.location_listeners[agent_id] = None
+                            self.location_readers[agent_id] = None
+                            self.location_listeners.pop(agent_id)
                             self.location_readers.pop(agent_id)
-                    self.location_listener.set_agent_ids(nearby_agents)  # update the list of agents we should be listening for
 
                 # Check Periodically for Dead Agents
                 dead_agents = []
