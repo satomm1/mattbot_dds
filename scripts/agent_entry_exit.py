@@ -968,9 +968,17 @@ class EntryExitCommunication:
                         self.agents[agent_id]['timestamp'] = heartbeats[agent_id]
                         update_to_active_agents = True
                     else:
-                        print(f'Agent {agent_id} heartbeat')
-                        # Never seen this agent before, should do something....
-                        pass
+                        print(f'Detected heartbeat from unknown agent {agent_id}')
+                        agent_hash = hash_id(str(agent_id))
+                        self.agents[agent_id] = {
+                            'agent_type': 'unknown',
+                            'capabilities': [],
+                            'message_types': [],
+                            'ip_address': 'unknown',
+                            'hash': agent_hash,
+                            'timestamp': heartbeats[agent_id]
+                        }
+                        update_to_active_agents = True
                 if update_to_active_agents:
                     self.entry_exit_listener.update_agents(agents=self.agents, exited_agents=self.exited_agents, lost_agents=self.lost_agents)
 
