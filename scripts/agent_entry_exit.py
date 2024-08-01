@@ -225,6 +225,13 @@ class EntryExitListener(Listener):
                         'hash': new_robot_hash,
                         'timestamp': sample.timestamp
                     }  
+
+                    # Remove from other agent lists if they are there
+                    if sample.agent_id in self.lost_agents:
+                        self.lost_agents.pop(sample.agent_id)
+                    elif sample.agent_id in self.exited_agents:
+                        self.exited_agents.pop(sample.agent_id)
+
                     self.update_to_agents = True
             elif sample.action == 'exit':
                 # Agent Exited, remove from agents dictionary
@@ -452,7 +459,7 @@ class InitializationListener(Listener):
                         ip_address = agent_info['ip_address']
                         agent_hash = agent_info['hash']
                         timestamp = agent_info['timestamp']
-                        self.agents[agent_id] = {
+                        self.agents[int(agent_id)] = {
                             'agent_type': agent_type,
                             'capabilities': capabilities,
                             'message_types': message_types,
@@ -900,8 +907,6 @@ class EntryExitCommunication:
                 theta = None
                 self.my_location = None
                 location_valid = False
-                # location_message = Location(int(self.my_id), current_time, x, y, theta)
-                # self.location_writer.write(location_message)
 
             # Collect received locations of nearby agents and publish them to a ROS topic
             agent_locations_array = AgentLocationsArray()
@@ -955,12 +960,25 @@ class EntryExitCommunication:
 
                 # Update agents with new heartbeats
                 heartbeats, locations = self.heartbeat_listener.get_heartbeats_and_locations()
-                for agent_id, timestamp in heartbeats.items():
+
+                update_to_active_agents = False
+                for agent_id in heartbeats.keys():
                     if agent_id in current_agents_list:
-                        self.agents[agent_id]['timestamp'] = timestamp
+                        self.agents[agent_id]['timestamp'] = heartbeats[agent_id]
+                    elif agent_id in self.exited_agents.keys():
+                        self.agents[agent_id] = self.exited_agents.pop(agent_id)
+                        self.agents[agent_id]['timestamp'] = heartbeats[agent_id]
+                        update_to_active_agents = True
+                    elif agent_id in self.lost_agents.keys():
+                        self.agents[agent_id] = self.lost_agents.pop(agent_id)
+                        self.agents[agent_id]['timestamp'] = heartbeats[agent_id]
+                        update_to_active_agents = True
                     else:
-                        # TODO
+                        print(f'Agent {agent_id} heartbeat')
+                        # Never seen this agent before, should do something....
                         pass
+                    if update_to_active_agents:
+                        self.entry_exit_listener.update_agents(agents=self.agents, exited_agents=self.exited_agents, lost_agents=self.lost_agents)
 
                 # Check for nearby agents
                 nearby_agents = set()
@@ -988,7 +1006,8 @@ class EntryExitCommunication:
                     prev_nearby_agents = nearby_agents
                    
                     # Remove readers that are no longer needed
-                    for agent_id in list(self.location_readers.keys()):
+                    agent_list = list(self.location_readers.keys())
+                    for agent_id in agent_list:
                         if agent_id not in nearby_agents:
                             self.location_listeners[agent_id] = None
                             self.location_readers[agent_id] = None
@@ -1008,9 +1027,7 @@ class EntryExitCommunication:
                     if time_difference > HEARTBEAT_TIMEOUT:
                         # Agent has timed out
                         print(f'Agent {agent_id} has timed out')
-                        dead_agents.append(agent_id)
-                
-                # Remove Dead Agents
+                        dead_agents.append(agent_id)              
                 for agent_id in dead_agents:
                     self.lost_agents[agent_id] = self.agents.pop(agent_id)
                 if dead_agents:
