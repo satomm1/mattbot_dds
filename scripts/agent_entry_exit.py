@@ -971,8 +971,8 @@ class EntryExitCommunication:
                         print(f'Agent {agent_id} heartbeat')
                         # Never seen this agent before, should do something....
                         pass
-                    if update_to_active_agents:
-                        self.entry_exit_listener.update_agents(agents=self.agents, exited_agents=self.exited_agents, lost_agents=self.lost_agents)
+                if update_to_active_agents:
+                    self.entry_exit_listener.update_agents(agents=self.agents, exited_agents=self.exited_agents, lost_agents=self.lost_agents)
 
                 # Check for nearby agents
                 nearby_agents = set()
