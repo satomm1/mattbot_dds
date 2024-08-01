@@ -212,7 +212,7 @@ class EntryExitListener(Listener):
             elif sample.action == 'initialized':
                 
                 # Only if the sample.timestamp is recent
-                if int(time.time()) - sample.timestamp < 5: 
+                if int(time.time()) - sample.timestamp < 10: 
                     print(f'Agent {sample.agent_id} of type \'{sample.agent_type}\' entered the environment')
 
                     # Agent initialized, add to agents dictionary
