@@ -155,6 +155,7 @@ class EntryExitListener(Listener):
         self.my_ip = my_ip
         self.my_hash = my_hash
         self.map_msg = OccupancyGrid()
+        self.map_mod_msg = OccupancyGrid()
         self.map_md_msg = MapMetaData()
         self.init_writer = init_writer
 
@@ -654,6 +655,7 @@ class EntryExitCommunication:
         self.map_md_msg = MapMetaData()
 
         self.map_publisher = rospy.Publisher('map', OccupancyGrid, queue_size=10)
+        self.map_mod_publisher = rospy.Publisher('map_mod', OccupancyGrid, queue_size=10)
         self.map_md_publisher = rospy.Publisher('map_metadata', MapMetaData, queue_size=10)
 
         # Create different policies for the DDS entities
@@ -773,6 +775,10 @@ class EntryExitCommunication:
                 data = json.load(f)
             map_data = data.get('data', {}).get('map', {})
 
+            with open(os.path.join(package_path, 'map_json', 'current_map_mod.json'), 'r') as f:
+                mod_data = json.load(f)
+            map_mod_data = mod_data.get('data', {}).get('map', {})
+
             self.map_msg.header.frame_id = 'map'
             self.map_msg.info.width = map_data.get('width')
             self.map_msg.info.height = map_data.get('height')
@@ -785,6 +791,20 @@ class EntryExitCommunication:
             self.map_msg.info.origin.orientation.z = map_data.get('origin_orientation_z')
             self.map_msg.info.origin.orientation.w = map_data.get('origin_orientation_w')
             self.map_msg.data = map_data.get('occupancy')
+
+            self.map_mod_msg = OccupancyGrid()
+            self.map_mod_msg.header.frame_id = 'map'
+            self.map_mod_msg.info.width = map_mod_data.get('width')
+            self.map_mod_msg.info.height = map_mod_data.get('height')
+            self.map_mod_msg.info.resolution = map_mod_data.get('resolution')
+            self.map_mod_msg.info.origin.position.x = map_mod_data.get('origin_x')
+            self.map_mod_msg.info.origin.position.y = map_mod_data.get('origin_y')
+            self.map_mod_msg.info.origin.position.z = map_mod_data.get('origin_z')
+            self.map_mod_msg.info.origin.orientation.x = map_mod_data.get('origin_orientation_x')
+            self.map_mod_msg.info.origin.orientation.y = map_mod_data.get('origin_orientation_y')
+            self.map_mod_msg.info.origin.orientation.z = map_mod_data.get('origin_orientation_z')
+            self.map_mod_msg.info.origin.orientation.w = map_mod_data.get('origin_orientation_w')
+            self.map_mod_msg.data = map_mod_data.get('occupancy')
 
             self.map_md_msg.map_load_time = rospy.Time.now()
             self.map_md_msg.resolution = map_data.get('resolution')
@@ -802,6 +822,7 @@ class EntryExitCommunication:
 
             # Publish the map and map metadata for ROS nodes
             self.map_publisher.publish(self.map_msg)
+            self.map_mod_publisher.publish(self.map_mod_msg)
             self.map_md_publisher.publish(self.map_md_msg)
 
             print("Map retrieved from saved file")
@@ -934,6 +955,7 @@ class EntryExitCommunication:
 
             # Publish map/map metadata periodically
             self.map_publisher.publish(self.map_msg)
+            self.map_mod_publisher.publish(self.map_mod_msg)
             self.map_md_publisher.publish(self.map_md_msg)
                 
             # Now publish heartbeat periodically
