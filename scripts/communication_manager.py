@@ -142,14 +142,18 @@ class CommManager:
                 self.other_agent_data_listeners[agent] = OtherDataListener(self.my_id, agent)
                 self.other_agent_data_readers[agent] = DataReader(self.subscriber, topic, listener=self.other_agent_data_listeners[agent], qos=self.reliable_qos)
                 print("Subscribed to agent " + str(agent))
+
+        agents_to_remove = []
         for agent in self.agents_subscribed:
             if agent not in agents:
-                self.agents_subscribed.remove(agent)
+                agents_to_remove.append(agent)
                 self.other_agent_data_readers[agent] = None
                 self.other_agent_data_readers.pop(agent)
                 self.other_agent_data_listeners[agent] = None
                 self.other_agent_data_listeners.pop(agent)    
                 print("Unsubscribed from agent " + str(agent))
+        for agent in agents_to_remove:
+            self.agents_subscribed.remove(agent)
 
     def run(self):
         while not rospy.is_shutdown():
