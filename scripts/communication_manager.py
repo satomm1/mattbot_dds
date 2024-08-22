@@ -3,6 +3,7 @@ from rospy_message_converter import message_converter
 import tf
 import rospkg
 from mattbot_image_detection.msg import DetectedObject
+from mattbot_dds.msg import AgentSubscription
 
 from cyclonedds.domain import DomainParticipant
 from cyclonedds.topic import Topic
@@ -140,6 +141,7 @@ class CommManager:
                 topic = Topic(self.participant, topic_name, DataMessage)
                 self.other_agent_data_listeners[agent] = OtherDataListener(self.my_id, agent)
                 self.other_agent_data_readers[agent] = DataReader(self.subscriber, topic, listener=self.other_agent_data_listeners[agent], qos=self.reliable_qos)
+                print("Subscribed to agent " + str(agent))
         for agent in self.agents_subscribed:
             if agent not in agents:
                 self.agents_subscribed.remove(agent)
@@ -147,11 +149,11 @@ class CommManager:
                 self.other_agent_data_readers.pop(agent)
                 self.other_agent_data_listeners[agent] = None
                 self.other_agent_data_listeners.pop(agent)    
+                print("Unsubscribed from agent " + str(agent))
 
     def run(self):
         while not rospy.is_shutdown():
             time.sleep(1)
-            print("Hello World")
 
     def shutdown(self):
         print("Shutting down DDS Communication Manager")
