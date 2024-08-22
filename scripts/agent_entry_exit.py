@@ -1,6 +1,7 @@
 import rospy
 from nav_msgs.msg import OccupancyGrid, MapMetaData, Path
 from mattbot_dds.msg import AgentLocationsArray
+from mattbot_dds.msg import AgentSubscription
 from geometry_msgs.msg import Pose, Pose2D
 from std_msgs.msg import Header, Int32
 from rospy_message_converter import message_converter
@@ -692,6 +693,7 @@ class EntryExitCommunication:
 
         # ROS publisher for publishing external goals
         self.goal_pub = rospy.Publisher('/external_goal', Pose2D, queue_size=10)
+        self.agent_sub_pub = rospy.Publisher('/agent_to_subscribe', AgentSubscription, queue_size=10)
 
         self.entry_exit_listener = EntryExitListener(self.participant, self.publisher, self.subscriber, self.my_id, self.my_ip, self.my_hash, self.init_writer)
         self.heartbeat_listener = HeartbeatListener(self.my_id)
@@ -1056,6 +1058,12 @@ class EntryExitCommunication:
                     self.lost_agents[agent_id] = self.agents.pop(agent_id)
                 if dead_agents:
                     self.entry_exit_listener.update_agents(agents=self.agents, lost_agents=self.lost_agents)
+
+                agent_sub_list = AgentSubscription()
+                agent_sub_list.agentIDs = list(self.agents.keys())
+                agent_sub_list.header.stamp = rospy.Time.now()
+                agent_sub_list.header.frame_id = 'map'
+                self.agent_sub_pub.publish(agent_sub_list)
 
             rate.sleep()
             
