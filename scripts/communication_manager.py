@@ -95,7 +95,7 @@ class CommManager:
 
         # Get robot ID, Hash, and IP Address
         self.my_id = os.environ.get('ROBOT_ID')
-        self.agents_subscribed = Set()
+        self.agents_subscribed = set()
 
         # Reliable qos
         self.reliable_qos = Qos(
@@ -133,7 +133,7 @@ class CommManager:
         self.data_writer.write(cone_message)
 
     def agent_subscription_callback(self, msg):
-        agents = msg.agentIDs
+        agents = msg.agentIDs.data
         for agent in agents:
             if agent not in self.agents_subscribed:
                 self.agents_subscribed.add(agent)

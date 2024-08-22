@@ -1059,11 +1059,13 @@ class EntryExitCommunication:
                 if dead_agents:
                     self.entry_exit_listener.update_agents(agents=self.agents, lost_agents=self.lost_agents)
 
-                agent_sub_list = AgentSubscription()
-                agent_sub_list.agentIDs = list(self.agents.keys())
-                agent_sub_list.header.stamp = rospy.Time.now()
-                agent_sub_list.header.frame_id = 'map'
-                self.agent_sub_pub.publish(agent_sub_list)
+                if len(self.agents) > 0:
+                    agent_sub_list = AgentSubscription()
+                    agent_sub_list.agentIDs.data = list(self.agents.keys())
+                    agent_sub_list.header.stamp = rospy.Time.now()
+                    agent_sub_list.header.frame_id = 'map'
+                    print(agent_sub_list)
+                    self.agent_sub_pub.publish(agent_sub_list)
 
             rate.sleep()
             

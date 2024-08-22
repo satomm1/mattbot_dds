@@ -1,2 +1,2 @@
 std_msgs/Header header
-std_msgs/Int32[] agentIDs
+std_msgs/Int32MultiArray agentIDs
