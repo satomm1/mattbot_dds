@@ -88,7 +88,7 @@ class OtherDataListener(Listener):
                     print("Received object from agent " + str(self.topic_id))
                 elif message_type == "path":
                     new_path = message_converter.convert_dictionary_to_ros_message('nav_msgs/Path', data)
-                    self.object_publisher.publish(new_path)
+                    self.path_publisher.publish(new_path)
                     print("Received path from agent " + str(self.topic_id))
             else:
                 # This was a message to the agent, we can safely ignore
