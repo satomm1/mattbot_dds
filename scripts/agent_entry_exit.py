@@ -1087,7 +1087,6 @@ class EntryExitCommunication:
                     agent_sub_list.agentIDs.data = list(self.agents.keys())
                     agent_sub_list.header.stamp = rospy.Time.now()
                     agent_sub_list.header.frame_id = 'map'
-                    print(agent_sub_list)
                     self.agent_sub_pub.publish(agent_sub_list)
 
             rate.sleep()
