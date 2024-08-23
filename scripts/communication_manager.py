@@ -64,10 +64,11 @@ class SelfDataListener(Listener):
 
 class OtherDataListener(Listener):
 
-    def __init__(self, my_id, topic_id):
+    def __init__(self, my_id, topic_id, object_publisher):
         super().__init__()
         self.my_id = my_id
         self.topic_id = topic_id
+        self.object_publisher = object_publisher
 
     def on_data_available(self, reader):
         for sample in reader.read():
@@ -139,7 +140,7 @@ class CommManager:
                 self.agents_subscribed.add(agent)
                 topic_name = 'DataTopic' + str(agent)
                 topic = Topic(self.participant, topic_name, DataMessage)
-                self.other_agent_data_listeners[agent] = OtherDataListener(self.my_id, agent)
+                self.other_agent_data_listeners[agent] = OtherDataListener(self.my_id, agent, self.object_publisher)
                 self.other_agent_data_readers[agent] = DataReader(self.subscriber, topic, listener=self.other_agent_data_listeners[agent], qos=self.reliable_qos)
                 print("Subscribed to agent " + str(agent))
 
