@@ -124,7 +124,6 @@ class CommManager:
         self.agent_subscriber = rospy.Subscriber('/agent_to_subscribe', AgentSubscription, self.agent_subscription_callback, queue_size=10)
     
     def cone_callback(self, msg):
-        print(msg)
         cone_message = DataMessage(
             message_type="detected_object",
             sending_agent=int(self.my_id),
