@@ -89,6 +89,7 @@ class Initialization(IdlStruct):
     sending_agent: str
     agents: str
     map: str
+    map_mod: str
     map_md: str
 
 @dataclass
@@ -204,10 +205,12 @@ class EntryExitListener(Listener):
 
                     map_dict = message_converter.convert_ros_message_to_dictionary(self.map_msg)
                     map_json = json.dumps(map_dict)
+                    map_mod_dict = message_converter.convert_ros_message_to_dictionary(self.map_mod_msg)
+                    map_mod_json = json.dumps(map_mod_dict)
                     map_md_dict = message_converter.convert_ros_message_to_dictionary(self.map_md_msg)
                     map_md_json = json.dumps(map_md_dict)
 
-                    init_message = Initialization(target_agent=sample.agent_id, sending_agent=sending_agent, agents=agents_message, map=map_json, map_md=map_md_json)
+                    init_message = Initialization(target_agent=sample.agent_id, sending_agent=sending_agent, agents=agents_message, map=map_json, map_mod=map_mod_json, map_md=map_md_json)
                     self.init_writer.write(init_message)
 
                     print(f'Sent initialization message to agent {sample.agent_id}')
@@ -308,7 +311,7 @@ class EntryExitListener(Listener):
         if lost_agents is not None:
             self.lost_agents = lost_agents
     
-    def update_map(self, my_map, map_md):
+    def update_map(self, my_map, my_map_mod, map_md):
         """
         Updates the occupancy grid map and map metadata.
 
@@ -320,6 +323,7 @@ class EntryExitListener(Listener):
         - None
         """
         self.map_msg = my_map
+        self.map_mod_msg = my_map_mod
         self.map_md_msg = map_md
 
 class HeartbeatListener(Listener):
@@ -408,14 +412,16 @@ class InitializationListener(Listener):
         map_md_publisher: Publisher for the map metadata message.
     """
 
-    def __init__(self, my_id, map_publisher, map_md_publisher):
+    def __init__(self, my_id, map_publisher, map_mod_publisher, map_md_publisher):
         super().__init__()
         self.map_received = False
         self.map_msg = OccupancyGrid()
+        self.map_mod_msg = OccupancyGrid()
         self.map_md_msg = MapMetaData()
         self.agents = dict()
         self.my_id = my_id
         self.map_publisher = map_publisher
+        self.map_mod_publisher = map_mod_publisher
         self.map_md_publisher = map_md_publisher
 
     def on_data_available(self, init_reader):
@@ -466,6 +472,7 @@ class InitializationListener(Listener):
 
             # Load the map from the initialization message
             map_dict = json.loads(sample.map)
+            map_mod_dict = json.loads(sample.map_mod)
             map_md_dict = json.loads(sample.map_md)
 
             load_time = rospy.Time.now()
@@ -486,6 +493,21 @@ class InitializationListener(Listener):
             self.map_msg.info.origin.orientation.w = map_md_dict['origin']['orientation']['w']
             self.map_msg.data = map_dict['data']
 
+            self.map_mod_msg.header.stamp = load_time
+            self.map_mod_msg.header.frame_id = 'map'
+            self.map_mod_msg.info.map_load_time = rospy.Time.now()
+            self.map_mod_msg.info.width = map_md_dict['width']
+            self.map_mod_msg.info.height = map_md_dict['height']
+            self.map_mod_msg.info.resolution = map_md_dict['resolution']
+            self.map_mod_msg.info.origin.position.x = map_md_dict['origin']['position']['x']
+            self.map_mod_msg.info.origin.position.y = map_md_dict['origin']['position']['y']
+            self.map_mod_msg.info.origin.position.z = map_md_dict['origin']['position']['z']
+            self.map_mod_msg.info.origin.orientation.x = map_md_dict['origin']['orientation']['x']
+            self.map_mod_msg.info.origin.orientation.y = map_md_dict['origin']['orientation']['y']
+            self.map_mod_msg.info.origin.orientation.z = map_md_dict['origin']['orientation']['z']
+            self.map_mod_msg.info.origin.orientation.w = map_md_dict['origin']['orientation']['w']
+            self.map_mod_msg.data = map_mod_dict['data']
+
             # Create map metadata message
             self.map_md_msg = MapMetaData()
             self.map_md_msg.map_load_time = load_time
@@ -502,6 +524,7 @@ class InitializationListener(Listener):
 
             # Publish the map and map metadata
             self.map_publisher.publish(self.map_msg)
+            self.map_mod_publisher.publish(self.map_mod_msg)
             self.map_md_publisher.publish(self.map_md_msg)
 
             self.map_received = True
@@ -524,7 +547,7 @@ class InitializationListener(Listener):
         Returns:
             tuple: A tuple containing the map message and map metadata message.
         """
-        return self.map_msg, self.map_md_msg
+        return self.map_msg, self.map_mod_msg, self.map_md_msg
 
     def get_agents(self):
         """
@@ -697,7 +720,7 @@ class EntryExitCommunication:
 
         self.entry_exit_listener = EntryExitListener(self.participant, self.publisher, self.subscriber, self.my_id, self.my_ip, self.my_hash, self.init_writer)
         self.heartbeat_listener = HeartbeatListener(self.my_id)
-        self.init_listener = InitializationListener(self.my_id, self.map_publisher, self.map_md_publisher)
+        self.init_listener = InitializationListener(self.my_id, self.map_publisher, self.map_mod_publisher, self.map_md_publisher)
         self.my_data_listener = DataListener(self.my_id, self.my_id, self.goal_pub)
         self.agent_data_listeners = dict()
 
