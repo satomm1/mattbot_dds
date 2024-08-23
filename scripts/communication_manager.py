@@ -4,6 +4,7 @@ import tf
 import rospkg
 from mattbot_image_detection.msg import DetectedObject
 from mattbot_dds.msg import AgentSubscription
+from nav_msgs.msg import Path
 
 from cyclonedds.domain import DomainParticipant
 from cyclonedds.topic import Topic
@@ -84,6 +85,10 @@ class OtherDataListener(Listener):
                     new_object = message_converter.convert_dictionary_to_ros_message('mattbot_image_detection/DetectedObject', data)
                     self.object_publisher.publish(new_object)
                     print("Received object from agent " + str(self.topic_id))
+                elif message_type == "path":
+                    new_path = message_converter.convert_dictionary_to_ros_message('nav_msgs/Path', data)
+                    self.object_publisher.publish(new_path)
+                    print("Received path from agent " + str(self.topic_id))
             else:
                 # This was a message to the agent, we can safely ignore
                 continue
@@ -119,9 +124,11 @@ class CommManager:
         self.other_agent_data_readers = {}
 
         self.object_publisher = rospy.Publisher('/object_from_agent', DetectedObject, queue_size=10)
+        self.path_publisher = rospy.Publisher('/path_from_agent', Path, queue_size=10)
 
         self.cone_subscriber = rospy.Subscriber('/new_cone_map', DetectedObject, self.cone_callback, queue_size=10)
         self.agent_subscriber = rospy.Subscriber('/agent_to_subscribe', AgentSubscription, self.agent_subscription_callback, queue_size=10)
+        self.path_subscriber = rospy.Subscriber('/cmd_smoothed_path', Path, self.path_callback, queue_size=10)
     
     def cone_callback(self, msg):
         cone_message = DataMessage(
@@ -131,6 +138,15 @@ class CommManager:
             data=json.dumps(message_converter.convert_ros_message_to_dictionary(msg))
         )
         self.data_writer.write(cone_message)
+
+    def path_callback(self, msg):
+        path_message = DataMessage(
+            message_type="path",
+            sending_agent=int(self.my_id),
+            timestamp=int(time.time()),
+            data=json.dumps(message_converter.convert_ros_message_to_dictionary(msg))
+        )
+        self.data_writer.write(path_message)
 
     def agent_subscription_callback(self, msg):
         agents = msg.agentIDs.data
