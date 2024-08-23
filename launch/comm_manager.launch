@@ -1,0 +1,3 @@
+<launch>
+    <node name="comm_manager" pkg="mattbot_dds" type="communication_manager.py" output="screen"/>
+</launch>
