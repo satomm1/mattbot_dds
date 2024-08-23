@@ -3,7 +3,7 @@ from rospy_message_converter import message_converter
 import tf
 import rospkg
 from mattbot_image_detection.msg import DetectedObject
-from mattbot_dds.msg import AgentSubscription
+from mattbot_dds.msg import AgentSubscription, AgentPath
 from nav_msgs.msg import Path
 
 from cyclonedds.domain import DomainParticipant
@@ -88,7 +88,10 @@ class OtherDataListener(Listener):
                     print("Received object from agent " + str(self.topic_id))
                 elif message_type == "path":
                     new_path = message_converter.convert_dictionary_to_ros_message('nav_msgs/Path', data)
-                    self.path_publisher.publish(new_path)
+                    new_agent_path = AgentPath()
+                    new_agent_path.agent_id.data = self.topic_id
+                    new_agent_path.path = new_path
+                    self.path_publisher.publish(new_agent_path)
                     print("Received path from agent " + str(self.topic_id))
             else:
                 # This was a message to the agent, we can safely ignore
@@ -125,7 +128,7 @@ class CommManager:
         self.other_agent_data_readers = {}
 
         self.object_publisher = rospy.Publisher('/object_from_agent', DetectedObject, queue_size=10)
-        self.path_publisher = rospy.Publisher('/path_from_agent', Path, queue_size=10)
+        self.path_publisher = rospy.Publisher('/path_from_agent', AgentPath, queue_size=10)
 
         self.cone_subscriber = rospy.Subscriber('/new_cone_map', DetectedObject, self.cone_callback, queue_size=10)
         self.agent_subscriber = rospy.Subscriber('/agent_to_subscribe', AgentSubscription, self.agent_subscription_callback, queue_size=10)

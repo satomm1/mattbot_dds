@@ -54,6 +54,7 @@ add_message_files(
   FILES
   AgentLocationsArray.msg
   AgentSubscription.msg
+  AgentPath.msg
 )
 
 ## Generate services in the 'srv' folder
@@ -75,6 +76,7 @@ generate_messages(
   DEPENDENCIES
   std_msgs
   geometry_msgs
+  nav_msgs
 )
 
 ################################################
@@ -109,7 +111,7 @@ generate_messages(
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES my_package
- CATKIN_DEPENDS message_runtime rospy std_msgs geometry_msgs
+ CATKIN_DEPENDS message_runtime rospy std_msgs geometry_msgs nav_msgs
 #  DEPENDS system_lib
 )
 
