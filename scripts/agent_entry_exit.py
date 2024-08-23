@@ -843,7 +843,7 @@ class EntryExitCommunication:
             self.map_md_msg.origin.orientation.z = map_data.get('origin_orientation_z')
             self.map_md_msg.origin.orientation.w = map_data.get('origin_orientation_w')
             
-            self.entry_exit_listener.update_map(self.map_msg, self.map_md_msg)
+            self.entry_exit_listener.update_map(self.map_msg, self.map_mod_msg, self.map_md_msg)
 
             # Publish the map and map metadata for ROS nodes
             self.map_publisher.publish(self.map_msg)
@@ -878,11 +878,11 @@ class EntryExitCommunication:
                     self.enter_exit_writer.write(entry_message)
 
             # Store the map, map metadata, and agents
-            self.map_msg, self.map_md_msg = self.init_listener.get_map()
+            self.map_msg, self.map_mod_msg, self.map_md_msg = self.init_listener.get_map()
             self.agents = self.init_listener.get_agents()
 
             # Update the entry/exit listener with the map
-            self.entry_exit_listener.update_map(self.map_msg, self.map_md_msg)
+            self.entry_exit_listener.update_map(self.map_msg, self.map_mod_msg, self.map_md_msg)
 
             # Update the agents in the entry/exit listener
             self.entry_exit_listener.update_agents(agents=self.agents)
