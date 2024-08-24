@@ -89,7 +89,7 @@ class OtherDataListener(Listener):
                 elif message_type == "path":
                     new_path = message_converter.convert_dictionary_to_ros_message('nav_msgs/Path', data)
                     new_agent_path = AgentPath()
-                    new_agent_path.agent_id.data = self.topic_id
+                    new_agent_path.agentID.data = self.topic_id
                     new_agent_path.path = new_path
                     self.path_publisher.publish(new_agent_path)
                     print("Received path from agent " + str(self.topic_id))
@@ -184,7 +184,7 @@ class CommManager:
 
 
 if __name__ == '__main__':
-    
+    time.sleep(5)  # Wait
     manager = CommManager()
     rospy.on_shutdown(manager.shutdown)
     manager.run()
