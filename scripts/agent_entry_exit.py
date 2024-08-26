@@ -8,7 +8,7 @@ from rospy_message_converter import message_converter
 import tf
 import rospkg
 
-from cyclonedds.domain import DomainParticipant
+from cyclonedds.domain import DomainParticipant, DomainParticipantQos
 from cyclonedds.topic import Topic
 from cyclonedds.sub import Subscriber, DataReader
 from cyclonedds.pub import Publisher, DataWriter
@@ -695,8 +695,12 @@ class EntryExitCommunication:
             Policy.History.KeepLast(depth=1)
         )
 
+        self.lease_duration_ms = 30000
+        qos_profile = DomainParticipantQos()
+        qos_profile.lease_duration = duration(milliseconds=self.lease_duration_ms)
+
         # Create a DomainParticipant, Subscriber, and Publisher
-        self.participant = DomainParticipant()
+        self.participant = DomainParticipant(qos=qos_profile)
         self.subscriber = Subscriber(self.participant)
         self.publisher = Publisher(self.participant)
 
