@@ -689,10 +689,17 @@ class EntryExitCommunication:
             Policy.History.KeepLast(depth=1)
         )
 
+        # self.best_effort_qos = Qos(
+        #     Policy.Reliability.BestEffort,
+        #     Policy.Durability.TransientLocal,
+        #     Policy.History.KeepLast(depth=1)
+        # )
+
         self.best_effort_qos = Qos(
             Policy.Reliability.BestEffort,
-            Policy.Durability.TransientLocal,
-            Policy.History.KeepLast(depth=1)
+            Policy.Durability.Volatile,
+            Policy.Deadline(duration(milliseconds=1000))
+            # Policy.History.KeepLast(depth=1)
         )
 
         self.lease_duration_ms = 30000
@@ -1001,7 +1008,9 @@ class EntryExitCommunication:
                     heartbeat_message = Heartbeat(int(self.my_id), current_time, location_valid, x, y, theta)
                 else:
                     heartbeat_message = Heartbeat(int(self.my_id), current_time, location_valid, 0.0, 0.0, 0.0)
+                print("Sending heartbeat")
                 self.heartbeat_writer.write(heartbeat_message)
+                print("Heartbeat sent")
 
                 # Update agents with new heartbeats
                 heartbeats, locations = self.heartbeat_listener.get_heartbeats_and_locations()
