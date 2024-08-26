@@ -55,6 +55,7 @@ add_message_files(
   AgentLocationsArray.msg
   AgentSubscription.msg
   AgentPath.msg
+  AgentLocation.msg
 )
 
 ## Generate services in the 'srv' folder
