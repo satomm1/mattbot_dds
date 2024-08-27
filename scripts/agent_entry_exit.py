@@ -28,9 +28,9 @@ import json
 import requests
 
 # Constants (Set depending on the agent)
-HEARTBEAT_PERIOD = 2    # seconds
-HEARTBEAT_TIMEOUT = 15  # seconds
-LOCATION_FREQUENCY = 2  # Hz
+HEARTBEAT_PERIOD = 10    # seconds
+HEARTBEAT_TIMEOUT = 31  # seconds
+LOCATION_FREQUENCY = 1  # Hz
 AGENT_CAPABILITIES = ['camera', 'lidar']
 AGENT_MESSAGE_TYPES = ['object_detection', 'object_tracking']
 AGENT_TYPE = 'robot'
@@ -698,7 +698,8 @@ class EntryExitCommunication:
         self.best_effort_qos = Qos(
             Policy.Reliability.BestEffort,
             Policy.Durability.Volatile,
-            Policy.Deadline(duration(milliseconds=1000))
+            Policy.Liveliness.ManualByParticipant(lease_duration=duration(milliseconds=30000))
+            # Policy.Deadline(duration(milliseconds=1000))
             # Policy.History.KeepLast(depth=1)
         )
 
@@ -1008,7 +1009,6 @@ class EntryExitCommunication:
                     heartbeat_message = Heartbeat(int(self.my_id), current_time, location_valid, x, y, theta)
                 else:
                     heartbeat_message = Heartbeat(int(self.my_id), current_time, location_valid, 0.0, 0.0, 0.0)
-                print("Sending heartbeat")
                 self.heartbeat_writer.write(heartbeat_message)
                 print("Heartbeat sent")
 

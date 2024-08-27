@@ -178,7 +178,8 @@ class CommManager:
         self.best_effort_qos = Qos(
             Policy.Reliability.BestEffort,
             Policy.Durability.Volatile,
-            Policy.Deadline(duration(milliseconds=1000))
+            Policy.Liveliness.ManualByParticipant(lease_duration=duration(milliseconds=30000))
+            # Policy.Deadline(duration(milliseconds=1000))
             # Policy.History.KeepLast(depth=1)
         )
 
