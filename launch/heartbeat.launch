@@ -1,0 +1,3 @@
+<launch>
+    <node name="heartbeat_publisher" pkg="mattbot_dds" type="heartbeat.py" output="screen"/>
+</launch>

@@ -169,6 +169,7 @@ include_directories(
 catkin_install_python(PROGRAMS
   scripts/agent_entry_exit.py
   scripts/communication_manager.py
+  scripts/heartbeat.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

@@ -721,7 +721,7 @@ class EntryExitCommunication:
 
         # Create the DataWriters and DataReaders
         self.enter_exit_writer = DataWriter(self.publisher, self.entry_exit_topic, qos=self.reliable_qos)
-        self.heartbeat_writer = DataWriter(self.publisher, self.heartbeat_topic, qos=self.best_effort_qos)
+        # self.heartbeat_writer = DataWriter(self.publisher, self.heartbeat_topic, qos=self.best_effort_qos)
         self.init_writer = DataWriter(self.publisher, self.init_topic, qos=self.reliable_qos)
         self.location_writer = DataWriter(self.publisher, self.location_topic, qos=self.best_effort_qos)
         self.data_writer = DataWriter(self.publisher, self.data_topic, qos=self.reliable_qos)
@@ -1004,13 +1004,13 @@ class EntryExitCommunication:
                     self.agents, self.exited_agents, self.lost_agents = self.entry_exit_listener.get_agents()
                 current_agents_list = list(self.agents.keys())
 
-                # Send out heartbeat
-                if location_valid:
-                    heartbeat_message = Heartbeat(int(self.my_id), current_time, location_valid, x, y, theta)
-                else:
-                    heartbeat_message = Heartbeat(int(self.my_id), current_time, location_valid, 0.0, 0.0, 0.0)
-                self.heartbeat_writer.write(heartbeat_message)
-                print("Heartbeat sent")
+                # # Send out heartbeat
+                # if location_valid:
+                #     heartbeat_message = Heartbeat(int(self.my_id), current_time, location_valid, x, y, theta)
+                # else:
+                #     heartbeat_message = Heartbeat(int(self.my_id), current_time, location_valid, 0.0, 0.0, 0.0)
+                # self.heartbeat_writer.write(heartbeat_message)
+                # print("Heartbeat sent")
 
                 # Update agents with new heartbeats
                 heartbeats, locations = self.heartbeat_listener.get_heartbeats_and_locations()
