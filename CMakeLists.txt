@@ -171,6 +171,7 @@ catkin_install_python(PROGRAMS
   scripts/communication_manager.py
   scripts/heartbeat.py
   scripts/location.py
+  scripts/goal_reader.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
