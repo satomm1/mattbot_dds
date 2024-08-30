@@ -684,7 +684,7 @@ class EntryExitCommunication:
 
         # Create different policies for the DDS entities
         self.reliable_qos = Qos(
-            Policy.Reliability.Reliable(max_blocking_time=duration(milliseconds=1)),
+            Policy.Reliability.Reliable(max_blocking_time=duration(milliseconds=10)),
             Policy.Durability.TransientLocal,
             Policy.History.KeepLast(depth=1)
         )
@@ -799,7 +799,7 @@ class EntryExitCommunication:
         for _ in self.built_in_reader.take_iter(timeout=duration(milliseconds=100)):
             self.num_participants += 1
 
-        if self.num_participants == 1:
+        if True: # self.num_participants == 1:
             # We are the first participant, we are responsible for getting the map
             print('I am the first agent to enter the environment')
 

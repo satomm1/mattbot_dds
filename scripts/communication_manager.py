@@ -176,7 +176,7 @@ class CommManager:
 
         # Reliable qos
         self.reliable_qos = Qos(
-            Policy.Reliability.Reliable(max_blocking_time=duration(milliseconds=1)),
+            Policy.Reliability.Reliable(max_blocking_time=duration(milliseconds=10)),
             Policy.Durability.TransientLocal,
             Policy.History.KeepLast(depth=1)
         )
