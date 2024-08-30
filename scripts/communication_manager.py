@@ -5,7 +5,7 @@ import rospkg
 from mattbot_image_detection.msg import DetectedObject
 from mattbot_dds.msg import AgentSubscription, AgentPath, AgentLocation
 from nav_msgs.msg import Path
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import Pose, Pose2D
 
 from cyclonedds.domain import DomainParticipant
 from cyclonedds.topic import Topic
@@ -64,6 +64,7 @@ class SelfDataListener(Listener):
         super().__init__()
         self.my_id = my_id
         self.topic_id = topic_id
+        self.goal_pub = rospy.Publisher('/external_goal', Pose2D, queue_size=10)
 
     def on_data_available(self, reader):
         for sample in reader.read():
@@ -80,7 +81,12 @@ class SelfDataListener(Listener):
             if self.topic_id == self.my_id:  # This is my topic, just a check
                 # Process the message
                 if message_type == "goal":
-                    pass
+                    print(f"Received goal message from agent {sending_agent}: x={data['x']}, y={data['y']}, theta={data['theta']}")
+                    goal_msg = Pose2D()
+                    goal_msg.x = data['x']
+                    goal_msg.y = data['y']
+                    goal_msg.theta = data['theta']
+                    self.goal_pub.publish(goal_msg)
 
 class OtherDataListener(Listener):
 

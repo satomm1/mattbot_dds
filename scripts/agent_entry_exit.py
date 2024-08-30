@@ -733,7 +733,7 @@ class EntryExitCommunication:
         self.entry_exit_listener = EntryExitListener(self.participant, self.publisher, self.subscriber, self.my_id, self.my_ip, self.my_hash, self.init_writer)
         self.heartbeat_listener = HeartbeatListener(self.my_id)
         self.init_listener = InitializationListener(self.my_id, self.map_publisher, self.map_mod_publisher, self.map_md_publisher)
-        self.my_data_listener = DataListener(self.my_id, self.my_id, self.goal_pub)
+        # self.my_data_listener = DataListener(self.my_id, self.my_id, self.goal_pub)
         self.agent_data_listeners = dict()
 
         # We will start the readers later when it is necessary
@@ -742,7 +742,7 @@ class EntryExitCommunication:
         self.heartbeat_reader = None
         self.location_readers = dict()
         self.location_listeners = dict()
-        self.my_data_reader = DataReader(self.subscriber, self.data_topic, listener=self.my_data_listener, qos=self.reliable_qos)
+        # self.my_data_reader = DataReader(self.subscriber, self.data_topic, listener=self.my_data_listener, qos=self.reliable_qos)
         self.agent_data_listeners = dict()
         self.agent_data_readers = dict()
 
