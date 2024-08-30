@@ -170,6 +170,7 @@ catkin_install_python(PROGRAMS
   scripts/agent_entry_exit.py
   scripts/communication_manager.py
   scripts/heartbeat.py
+  scripts/location.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

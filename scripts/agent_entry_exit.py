@@ -936,29 +936,29 @@ class EntryExitCommunication:
 
             current_time = int(time.time())  # Get the current time
 
-            # Get current position of the agent and publish to location topic
-            location_valid = False
-            try:
-                (translation, rotation) = self.trans_listener.lookupTransform("map", "base_footprint", rospy.Time(0))
-                x = translation[0]
-                y = translation[1]
-                euler = tf.transformations.euler_from_quaternion(rotation)
-                theta = euler[2]
+            # # Get current position of the agent and publish to location topic
+            # location_valid = False
+            # try:
+            #     (translation, rotation) = self.trans_listener.lookupTransform("map", "base_footprint", rospy.Time(0))
+            #     x = translation[0]
+            #     y = translation[1]
+            #     euler = tf.transformations.euler_from_quaternion(rotation)
+            #     theta = euler[2]
 
-                self.my_location = (x, y, theta)
-                location_valid = True
+            #     self.my_location = (x, y, theta)
+            #     location_valid = True
 
-                # Publish to this agent's location topic
-                location_message = Location(int(self.my_id), current_time, x, y, theta)
-                self.location_writer.write(location_message)
+            #     # Publish to this agent's location topic
+            #     location_message = Location(int(self.my_id), current_time, x, y, theta)
+            #     self.location_writer.write(location_message)
 
-            except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
-                # Location not available yet (not yet localized)
-                x = None
-                y = None
-                theta = None
-                self.my_location = None
-                location_valid = False
+            # except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
+            #     # Location not available yet (not yet localized)
+            #     x = None
+            #     y = None
+            #     theta = None
+            #     self.my_location = None
+            #     location_valid = False
 
             # Collect received locations of nearby agents and publish them to a ROS topic
             agent_locations_array = AgentLocationsArray()

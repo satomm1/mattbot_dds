@@ -1,0 +1,100 @@
+import rospy
+import tf
+
+from cyclonedds.domain import DomainParticipant, DomainParticipantQos
+from cyclonedds.topic import Topic
+from cyclonedds.sub import Subscriber, DataReader
+from cyclonedds.pub import Publisher, DataWriter
+from cyclonedds.util import duration
+from cyclonedds.idl import IdlStruct
+from cyclonedds.idl.types import sequence
+from cyclonedds.core import Qos, Policy, Listener
+from cyclonedds.builtin import BuiltinDataReader, BuiltinTopicDcpsParticipant
+
+from dataclasses import dataclass
+import time
+import os
+
+LOCATION_PERIOD = 0.75    # seconds
+
+@dataclass
+class Location(IdlStruct):
+    """
+    Represents the location of an agent.
+
+    Attributes:
+        agent_id (int): The ID of the agent.
+        timestamp (int): The timestamp of the location message.
+        x (float): The x-coordinate of the agent.
+        y (float): The y-coordinate of the agent.
+        theta (float): The orientation of the agent.
+    """
+    agent_id: int
+    timestamp: int
+    x: float
+    y: float
+    theta: float
+
+class LocationPublisher:
+    def __init__(self):
+        rospy.init_node('dds_location', anonymous=True)
+
+        # Get robot ID, Hash, and IP Address
+        self.my_id = os.environ.get('ROBOT_ID')
+
+        # Reliable qos
+        self.reliable_qos = Qos(
+            Policy.Reliability.Reliable(max_blocking_time=duration(milliseconds=1)),
+            Policy.Durability.TransientLocal,
+            Policy.History.KeepLast(depth=1)
+        )
+
+        self.best_effort_qos = Qos(
+            Policy.Reliability.BestEffort,
+            Policy.Durability.Volatile,
+            Policy.Liveliness.ManualByParticipant(lease_duration=duration(milliseconds=30000))
+            # Policy.Deadline(duration(milliseconds=1000))
+            # Policy.History.KeepLast(depth=1)
+        )
+
+        self.lease_duration_ms = 30000
+        qos_profile = DomainParticipantQos()
+        qos_profile.lease_duration = duration(milliseconds=self.lease_duration_ms)
+
+        # Create a DomainParticipant, Subscriber, and Publisher
+        self.participant = DomainParticipant()
+        self.publisher = Publisher(self.participant)
+
+        self.location_topic = Topic(self.participant, 'LocationTopic' + str(self.my_id), Location)
+        self.location_writer = DataWriter(self.publisher, self.location_topic, qos=self.best_effort_qos)
+
+        self.trans_listener = tf.TransformListener()
+
+    def run(self):
+        while not rospy.is_shutdown():
+
+            # Get current position of the agent
+            try:
+                (translation, rotation) = self.trans_listener.lookupTransform("map", "base_footprint", rospy.Time(0))
+                x = translation[0]
+                y = translation[1]
+                euler = tf.transformations.euler_from_quaternion(rotation)
+                theta = euler[2]
+
+                location = Location(int(self.my_id), int(time.time()), x, y, theta)
+                self.location_writer.write(location)
+
+            except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
+                # Location not available yet (not yet localized)
+                pass
+
+            # Sleep for LOCATION_PERIOD seconds
+            rospy.sleep(LOCATION_PERIOD)
+
+    def shutdown(self):
+        rospy.loginfo("Shutting down DDS location publisher...")
+
+if __name__ == '__main__':
+    location_publisher = LocationPublisher()
+    rospy.on_shutdown(location_publisher.shutdown)
+    location_publisher.run()
