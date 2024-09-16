@@ -220,6 +220,7 @@ class CommManager:
             data=json.dumps(message_converter.convert_ros_message_to_dictionary(msg))
         )
         self.data_writer.write(cone_message)
+        time.sleep(0.01)
 
     def path_callback(self, msg):
         path_message = DataMessage(
@@ -229,6 +230,7 @@ class CommManager:
             data=json.dumps(message_converter.convert_ros_message_to_dictionary(msg))
         )
         self.data_writer.write(path_message)
+        time.sleep(0.01)
 
     def agent_subscription_callback(self, msg):
         agents = msg.agentIDs.data
