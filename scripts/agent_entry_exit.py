@@ -803,6 +803,9 @@ class EntryExitCommunication:
             # We are the first participant, we are responsible for getting the map
             print('I am the first agent to enter the environment')
 
+            self.init_reader = None
+            self.init_listener = None
+
             # find mattbot_mcl package path
             rospack = rospkg.RosPack()
             package_path = rospack.get_path('mattbot_mcl')
