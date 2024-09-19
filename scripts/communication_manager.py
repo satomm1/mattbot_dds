@@ -2,7 +2,7 @@ import rospy
 from rospy_message_converter import message_converter
 import tf
 import rospkg
-from mattbot_image_detection.msg import DetectedObject
+from mattbot_image_detection.msg import DetectedObject, DetectedObjectArray
 from mattbot_dds.msg import AgentSubscription, AgentPath, AgentLocation
 from nav_msgs.msg import Path
 from geometry_msgs.msg import Pose, Pose2D
@@ -90,11 +90,12 @@ class SelfDataListener(Listener):
 
 class OtherDataListener(Listener):
 
-    def __init__(self, my_id, topic_id, object_publisher, path_publisher):
+    def __init__(self, my_id, topic_id, object_publisher, object_sensor_publisher, path_publisher):
         super().__init__()
         self.my_id = my_id
         self.topic_id = topic_id
         self.object_publisher = object_publisher
+        self.object_sensor_publisher = object_sensor_publisher
         self.path_publisher = path_publisher
 
     def on_data_available(self, reader):
@@ -111,6 +112,34 @@ class OtherDataListener(Listener):
                     new_object = message_converter.convert_dictionary_to_ros_message('mattbot_image_detection/DetectedObject', data)
                     self.object_publisher.publish(new_object)
                     print("Received object from agent " + str(self.topic_id))
+                elif message_type == "sensor_detected_objects":
+                    x = data['x']
+                    y = data['y']
+                    w = data['w']
+                    class_name = data['class']
+
+                    object_array = DetectedObjectArray()
+                    object_array.header.stamp = rospy.Time.now()
+                    object_array.header.frame_id = "map"
+                    object_array.sending_agent = sending_agent
+                    object_array.objects = []
+                    for i in range(len(x)):
+                        detected_object = DetectedObject()
+                        detected_object.class_name = class_name[i]
+                        detected_object.probability = 1.0
+                        detected_object_pose = Pose()
+                        detected_object_pose.position.x = x[i]
+                        detected_object_pose.position.y = y[i]
+                        detected_object_pose.position.z = 0
+                        detected_object_pose.orientation.w = 1
+                        detected_object.pose = detected_object_pose
+                        detected_object.width = w[i]
+                        object_array.objects.append(detected_object)
+                    
+                    # print(object_array)
+                    # if len(object_array.objects) > 0:
+                    self.object_sensor_publisher.publish(object_array)
+
                 elif message_type == "path":
                     new_path = message_converter.convert_dictionary_to_ros_message('nav_msgs/Path', data)
                     new_agent_path = AgentPath()
@@ -205,6 +234,7 @@ class CommManager:
         self.other_agent_location_readers = {}
 
         self.object_publisher = rospy.Publisher('/object_from_agent', DetectedObject, queue_size=10)
+        self.object_sensor_publisher = rospy.Publisher('/object_from_sensor', DetectedObjectArray, queue_size=10)
         self.path_publisher = rospy.Publisher('/path_from_agent', AgentPath, queue_size=10)
         self.location_publisher = rospy.Publisher('/agent_location', AgentLocation, queue_size=10)
 
@@ -240,7 +270,7 @@ class CommManager:
 
                 topic_name = 'DataTopic' + str(agent)
                 topic = Topic(self.participant, topic_name, DataMessage)
-                self.other_agent_data_listeners[agent] = OtherDataListener(self.my_id, agent, self.object_publisher, self.path_publisher)
+                self.other_agent_data_listeners[agent] = OtherDataListener(self.my_id, agent, self.object_publisher, self.object_sensor_publisher, self.path_publisher)
                 self.other_agent_data_readers[agent] = DataReader(self.subscriber, topic, listener=self.other_agent_data_listeners[agent], qos=self.reliable_qos)
 
                 location_topic_name = 'LocationTopic' + str(agent)
