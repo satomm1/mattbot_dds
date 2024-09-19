@@ -917,9 +917,6 @@ class EntryExitCommunication:
 
             print("Initialization complete")
 
-        # Subscribe to the path topic
-        rospy.Subscriber('/cmd_smoothed_path', Path, self.path_callback)
-
     def run(self):
         """
         Executes the main loop of the agent_entry_exit node.
@@ -1106,21 +1103,6 @@ class EntryExitCommunication:
                     self.agent_sub_pub.publish(agent_sub_list)
 
             rate.sleep()
-            
-    def path_callback(self, path):
-        """
-        Callback function for receiving a path message from the path planner.
-
-        Args:
-            path (Path): The path message received from the path planner.
-        """        
-        # Convert path to dictionary
-        path_dict = message_converter.convert_ros_message_to_dictionary(path)
-        path_json = json.dumps(path_dict)
-
-        timestamp = int(time.time())
-        my_message = DataMessage('path', int(self.my_id), timestamp, path_json)
-        self.data_writer.write(my_message)
 
     def shutdown(self):
         print('Shutting down...')
