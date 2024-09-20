@@ -211,7 +211,7 @@ class EntryExitListener(Listener):
                     map_md_dict = message_converter.convert_ros_message_to_dictionary(self.map_md_msg)
                     map_md_json = json.dumps(map_md_dict)
 
-                    if int(sample.agent_id) >= 200:
+                    if int(sample.agent_id) >= SENSOR_AGENT_START:
                         blank_map = OccupancyGrid()
                         map_dict = message_converter.convert_ros_message_to_dictionary(blank_map)
                         map_json = json.dumps(map_dict)
