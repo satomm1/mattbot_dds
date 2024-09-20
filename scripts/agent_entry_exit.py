@@ -35,6 +35,7 @@ AGENT_CAPABILITIES = ['camera', 'lidar']
 AGENT_MESSAGE_TYPES = ['object_detection', 'object_tracking']
 AGENT_TYPE = 'robot'
 DISTANCE_THRESHOLD = 5.0
+SENSOR_AGENT_START = 200  # The id of agents which are sensor's only
 
 @dataclass
 class EntryExit(IdlStruct):
@@ -267,13 +268,14 @@ class EntryExitListener(Listener):
 
         # Loop through all agents to see if there is a closer robot (by hash)
         for agent_id, agent_info in self.agents.items():
-            agent_hash = agent_info['hash']
+            if agent_id < SENSOR_AGENT_START:  # Sensor agents don't have full map so not eligible to be closest robot
+                agent_hash = agent_info['hash']
 
-            if agent_hash != robot_hash:
-                distance = abs(agent_hash / num_agents - robot_hash / num_agents)
-                if distance < my_distance:
-                    # I am not the closest robot
-                    return False
+                if agent_hash != robot_hash:
+                    distance = abs(agent_hash / num_agents - robot_hash / num_agents)
+                    if distance < my_distance:
+                        # I am not the closest robot
+                        return False
 
         # I am the closest robot
         return True
@@ -804,7 +806,7 @@ class EntryExitCommunication:
         for _ in self.built_in_reader.take_iter(timeout=duration(milliseconds=100)):
             self.num_participants += 1
 
-        if True: # self.num_participants == 1:
+        if self.num_participants == 1:
             # We are the first participant, we are responsible for getting the map
             print('I am the first agent to enter the environment')
 
