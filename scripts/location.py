@@ -1,4 +1,5 @@
 import rospy
+from std_msgs.msg import Float64MultiArray
 import tf
 
 from cyclonedds.domain import DomainParticipant, DomainParticipantQos
@@ -70,6 +71,32 @@ class LocationPublisher:
 
         self.trans_listener = tf.TransformListener()
 
+        self.R = None
+        self.t = None
+        transformation_subscriber = rospy.Subscriber('transformation_matrix', Float64MultiArray, self.transformation_callback)
+
+    def transformation_callback(self, data):
+        # Get the transformation matrix
+        transformation_matrix = data.data
+
+        # Reshape the transformation matrix
+        self.R = transformation_matrix[:4].reshape(2, 2)
+        self.t = transformation_matrix[4:]
+
+    def transform_point(self, point, forward=True):
+        if self.R is None:
+            return point
+
+        point_xy = np.array([point[0], point[1]])
+        if forward:
+            new_point_xy = self.R @ point_xy + self.t
+            new_point_theta = point[2] + np.arctan2(self.R[1, 0], self.R[0, 0])
+            return np.concatenate((new_point_xy, [new_point_theta]))
+        else:
+            new_point_xy = self.R.T @ (point_xy - self.t)
+            new_point_theta = point[2] - np.arctan2(self.R[1, 0], self.R[0, 0])
+            return np.concatenate((new_point_xy, [new_point_theta]))
+
     def run(self):
         while not rospy.is_shutdown():
 
@@ -81,7 +108,9 @@ class LocationPublisher:
                 euler = tf.transformations.euler_from_quaternion(rotation)
                 theta = euler[2]
 
-                location = Location(int(self.my_id), int(time.time()), x, y, theta)
+                transformed_point = self.transform_point([x, y, theta])
+                x_new, y_new, theta_new = transformed_point
+                location = Location(int(self.my_id), int(time.time()), x_new, y_new, theta_new)
                 self.location_writer.write(location)
 
             except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:

@@ -6,6 +6,7 @@ from mattbot_image_detection.msg import DetectedObject
 from mattbot_dds.msg import AgentSubscription, AgentPath, AgentLocation
 from nav_msgs.msg import Path
 from geometry_msgs.msg import Pose, Pose2D
+from std_msgs.msg import Float64MultiArray
 
 from cyclonedds.domain import DomainParticipant
 from cyclonedds.topic import Topic
@@ -66,6 +67,9 @@ class SelfDataListener(Listener):
         self.topic_id = topic_id
         self.goal_pub = rospy.Publisher('/external_goal', Pose2D, queue_size=10)
 
+        self.R = None
+        self.t = None
+
     def on_data_available(self, reader):
         for sample in reader.read():
             
@@ -80,12 +84,34 @@ class SelfDataListener(Listener):
 
             # Process the message
             if message_type == "goal":
-                print(f"Received goal message from agent {sending_agent}: x={data['x']}, y={data['y']}, theta={data['theta']}")
+
+                # Transform the goal point to this occupancy grid
+                x, y, theta = self.transform_point([data['x'], data['y'], data['theta']], forward=False)
+
+                print(f"Received goal message from agent {sending_agent}: x={x}, y={y}, theta={theta}")
                 goal_msg = Pose2D()
-                goal_msg.x = data['x']
-                goal_msg.y = data['y']
-                goal_msg.theta = data['theta']
+                goal_msg.x = x
+                goal_msg.y = y
+                goal_msg.theta = theta
                 self.goal_pub.publish(goal_msg)
+
+    def update_transformation_matrix(self, R, t):   
+        self.R = R
+        self.t = t
+
+    def transform_point(self, point, forward=True):
+        if self.R is None:
+            return point
+
+        point_xy = np.array([point[0], point[1]])
+        if forward:
+            new_point_xy = self.R @ point_xy + self.t
+            new_point_theta = point[2] + np.arctan2(self.R[1, 0], self.R[0, 0])
+            return np.concatenate((new_point_xy, [new_point_theta]))
+        else:
+            new_point_xy = self.R.T @ (point_xy - self.t)
+            new_point_theta = point[2] - np.arctan2(self.R[1, 0], self.R[0, 0])
+            return np.concatenate((new_point_xy, [new_point_theta]))
 
 class GoalReader:
 
@@ -121,6 +147,20 @@ class GoalReader:
         self.data_topic = Topic(self.participant, 'DataTopic' + str(self.my_id), DataMessage)
         self.data_listener = SelfDataListener(self.my_id, self.my_id)
         self.data_reader = DataReader(self.subscriber, self.data_topic, listener=self.data_listener, qos=self.reliable_qos)
+
+        self.R = None
+        self.t = None
+        transformation_subscriber = rospy.Subscriber('transformation_matrix', Float64MultiArray, self.transformation_callback)
+
+    def transformation_callback(self, data):
+        # Get the transformation matrix
+        transformation_matrix = data.data
+
+        # Reshape the transformation matrix
+        self.R = transformation_matrix[:4].reshape(2, 2)
+        self.t = transformation_matrix[4:]
+
+        self.data_listener.update_transformation_matrix(self.R, self.t)
 
     def run(self):
         while not rospy.is_shutdown():

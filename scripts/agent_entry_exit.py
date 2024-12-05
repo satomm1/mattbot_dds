@@ -3,7 +3,7 @@ from nav_msgs.msg import OccupancyGrid, MapMetaData, Path
 from mattbot_dds.msg import AgentLocationsArray
 from mattbot_dds.msg import AgentSubscription
 from geometry_msgs.msg import Pose, Pose2D
-from std_msgs.msg import Header, Int32
+from std_msgs.msg import Header, Int32, Float64MultiArray
 from rospy_message_converter import message_converter
 import tf
 import rospkg
@@ -81,17 +81,15 @@ class Initialization(IdlStruct):
     Represents the initialization parameters for the agent entry/exit system.
 
     Attributes:
+        target_agent (int): The ID of the agent that the initialization message is intended for.
         sending_agent (str): A json dict of the sending agent.
         agents (str): A json dict of all the agents that the sending_agent is aware of.
-        map (str): A json of the ROS map message (Occupancy Grid) that the sending agent has.
-        map_md (str): A json of the ROS map metadata message that the sending agent has.
+        known_points (str): A json dict of all the known correspondance points in the environment.
     """
     target_agent: int
     sending_agent: str
     agents: str
-    map: str
-    map_mod: str
-    map_md: str
+    known_points: str
 
 @dataclass
 class Location(IdlStruct):
@@ -160,6 +158,7 @@ class EntryExitListener(Listener):
         self.map_msg = OccupancyGrid()
         self.map_mod_msg = OccupancyGrid()
         self.map_md_msg = MapMetaData()
+        self.known_points = []
         self.init_writer = init_writer
 
         self.update_to_agents = False
@@ -318,20 +317,32 @@ class EntryExitListener(Listener):
         if lost_agents is not None:
             self.lost_agents = lost_agents
     
-    def update_map(self, my_map, my_map_mod, map_md):
+    # def update_map(self, my_map, my_map_mod, map_md):
+    #     """
+    #     Updates the occupancy grid map and map metadata.
+
+    #     Parameters:
+    #     - map (OccupancyGrid): The updated occupancy grid map.
+    #     - map_md (MapMetaData): The updated map metadata.
+
+    #     Returns:
+    #     - None
+    #     """
+    #     self.map_msg = my_map
+    #     self.map_mod_msg = my_map_mod
+    #     self.map_md_msg = map_md
+
+    def update_known_points(self, known_points):
         """
-        Updates the occupancy grid map and map metadata.
+        Updates the known points in the environment.
 
         Parameters:
-        - map (OccupancyGrid): The updated occupancy grid map.
-        - map_md (MapMetaData): The updated map metadata.
+        - known_points (list): A list of known points in the environment.
 
         Returns:
         - None
         """
-        self.map_msg = my_map
-        self.map_mod_msg = my_map_mod
-        self.map_md_msg = map_md
+        self.known_points = known_points
 
 class HeartbeatListener(Listener):
     """
@@ -351,6 +362,27 @@ class HeartbeatListener(Listener):
         self.locations = dict()
         self.new_locations = dict()
         self.my_id = my_id
+
+        self.R = None
+        self.t = None
+
+    def transform_point(self, point, forward=True):
+        if self.R is None:
+            return point
+
+        point_xy = np.array([point[0], point[1]])
+        if forward:
+            new_point_xy = self.R @ point_xy + self.t
+            new_point_theta = point[2] + np.arctan2(self.R[1, 0], self.R[0, 0])
+            return np.concatenate((new_point_xy, [new_point_theta]))
+        else:
+            new_point_xy = self.R.T @ (point_xy - self.t)
+            new_point_theta = point[2] - np.arctan2(self.R[1, 0], self.R[0, 0])
+            return np.concatenate((new_point_xy, [new_point_theta]))
+
+    def update_transformation(self, R, t):
+        self.R = R
+        self.t = t
 
     def on_data_available(self, reader):
         """
@@ -372,8 +404,14 @@ class HeartbeatListener(Listener):
             self.heartbeats[sample.agent_id] = sample.timestamp
 
             if sample.location_valid:
-                self.locations[sample.agent_id] = (sample.x, sample.y, sample.theta)
-                self.new_locations[sample.agent_id] = (sample.x, sample.y, sample.theta)
+
+                new_point = self.transform_point([sample.x, sample.y, sample.theta], forward=False)
+                x = new_point[0]
+                y = new_point[1]
+                theta = new_point[2]
+
+                self.locations[sample.agent_id] = (x, y, theta)
+                self.new_locations[sample.agent_id] = (x, y, theta)
             else:
                 self.locations[sample.agent_id] = None
                 self.new_locations[sample.agent_id] = None
@@ -430,6 +468,8 @@ class InitializationListener(Listener):
         self.map_publisher = map_publisher
         self.map_mod_publisher = map_mod_publisher
         self.map_md_publisher = map_md_publisher
+        self.known_points_received = False
+        self.reference_known_points = []
 
     def on_data_available(self, init_reader):
         """
@@ -477,66 +517,12 @@ class InitializationListener(Listener):
                             'timestamp': agent_info['timestamp']
                         }  
 
-            # Load the map from the initialization message
-            map_dict = json.loads(sample.map)
-            map_mod_dict = json.loads(sample.map_mod)
-            map_md_dict = json.loads(sample.map_md)
+            # Load the known points from the initialization message
+            known_points = json.loads(sample.known_points)
+            self.reference_known_points = known_points
+            self.known_points_received = True
 
-            load_time = rospy.Time.now()
-
-            # Create the OccupancyGrid message
-            self.map_msg.header.stamp = load_time
-            self.map_msg.header.frame_id = 'map'
-            self.map_msg.info.map_load_time = rospy.Time.now()
-            self.map_msg.info.resolution = map_md_dict['resolution']
-            self.map_msg.info.width = map_md_dict['width']
-            self.map_msg.info.height = map_md_dict['height']
-            self.map_msg.info.origin.position.x = map_md_dict['origin']['position']['x']
-            self.map_msg.info.origin.position.y = map_md_dict['origin']['position']['y']
-            self.map_msg.info.origin.position.z = map_md_dict['origin']['position']['z']
-            self.map_msg.info.origin.orientation.x = map_md_dict['origin']['orientation']['x']
-            self.map_msg.info.origin.orientation.y = map_md_dict['origin']['orientation']['y']
-            self.map_msg.info.origin.orientation.z = map_md_dict['origin']['orientation']['z']
-            self.map_msg.info.origin.orientation.w = map_md_dict['origin']['orientation']['w']
-            self.map_msg.data = map_dict['data']
-
-            self.map_mod_msg.header.stamp = load_time
-            self.map_mod_msg.header.frame_id = 'map'
-            self.map_mod_msg.info.map_load_time = rospy.Time.now()
-            self.map_mod_msg.info.width = map_md_dict['width']
-            self.map_mod_msg.info.height = map_md_dict['height']
-            self.map_mod_msg.info.resolution = map_md_dict['resolution']
-            self.map_mod_msg.info.origin.position.x = map_md_dict['origin']['position']['x']
-            self.map_mod_msg.info.origin.position.y = map_md_dict['origin']['position']['y']
-            self.map_mod_msg.info.origin.position.z = map_md_dict['origin']['position']['z']
-            self.map_mod_msg.info.origin.orientation.x = map_md_dict['origin']['orientation']['x']
-            self.map_mod_msg.info.origin.orientation.y = map_md_dict['origin']['orientation']['y']
-            self.map_mod_msg.info.origin.orientation.z = map_md_dict['origin']['orientation']['z']
-            self.map_mod_msg.info.origin.orientation.w = map_md_dict['origin']['orientation']['w']
-            self.map_mod_msg.data = map_mod_dict['data']
-
-            # Create map metadata message
-            self.map_md_msg = MapMetaData()
-            self.map_md_msg.map_load_time = load_time
-            self.map_md_msg.resolution = map_md_dict['resolution']
-            self.map_md_msg.width = map_md_dict['width']
-            self.map_md_msg.height = map_md_dict['height']
-            self.map_md_msg.origin.position.x = map_md_dict['origin']['position']['x']
-            self.map_md_msg.origin.position.y = map_md_dict['origin']['position']['y']
-            self.map_md_msg.origin.position.z = map_md_dict['origin']['position']['z']
-            self.map_md_msg.origin.orientation.x = map_md_dict['origin']['orientation']['x']
-            self.map_md_msg.origin.orientation.y = map_md_dict['origin']['orientation']['y']
-            self.map_md_msg.origin.orientation.z = map_md_dict['origin']['orientation']['z']
-            self.map_md_msg.origin.orientation.w = map_md_dict['origin']['orientation']['w']
-
-            # Publish the map and map metadata
-            self.map_publisher.publish(self.map_msg)
-            self.map_mod_publisher.publish(self.map_mod_msg)
-            self.map_md_publisher.publish(self.map_md_msg)
-
-            self.map_received = True
-
-            print("Map received through initialization message")
+            print(f'Initialization message received from agent {sending_agent_dict["id"]}')
 
     def map_available(self):
         """
@@ -547,6 +533,15 @@ class InitializationListener(Listener):
         """
         return self.map_received
 
+    def known_points_available(self):
+        """
+        Check if the known points have been received.
+
+        Returns:
+            bool: True if the known points have been received, False otherwise.
+        """
+        return self.known_points_received
+
     def get_map(self):
         """
         Get the map and map metadata.
@@ -555,6 +550,15 @@ class InitializationListener(Listener):
             tuple: A tuple containing the map message and map metadata message.
         """
         return self.map_msg, self.map_mod_msg, self.map_md_msg
+
+    def get_known_points(self):
+        """
+        Get the known points in the environment.
+
+        Returns:
+            list: A list of known points in the environment.
+        """
+        return self.reference_known_points
 
     def get_agents(self):
         """
@@ -584,6 +588,27 @@ class LocationListener(Listener):
         self.my_id = my_id
         self.location = None
 
+        self.R = None
+        self.t = None
+
+    def transform_point(self, point, forward=True):
+        if self.R is None:
+            return point
+
+        point_xy = np.array([point[0], point[1]])
+        if forward:
+            new_point_xy = self.R @ point_xy + self.t
+            new_point_theta = point[2] + np.arctan2(self.R[1, 0], self.R[0, 0])
+            return np.concatenate((new_point_xy, [new_point_theta]))
+        else:
+            new_point_xy = self.R.T @ (point_xy - self.t)
+            new_point_theta = point[2] - np.arctan2(self.R[1, 0], self.R[0, 0])
+            return np.concatenate((new_point_xy, [new_point_theta]))
+
+    def update_transformation(self, R, t):
+        self.R = R
+        self.t = t
+
     def on_data_available(self, reader):
         """
         Callback method called when data is available.
@@ -600,7 +625,8 @@ class LocationListener(Listener):
             if sample.agent_id == int(self.my_id):
                 continue
             
-            self.location = (sample.x, sample.y, sample.theta)
+            new_point = self.transform_point([sample.x, sample.y, sample.theta], forward=False)
+            self.location = (new_point[0], new_point[1], new_point[2])
 
     def get_location(self):
         """
@@ -620,6 +646,27 @@ class DataListener(Listener):
         self.topic_id = topic_id
         self.goal_pub = goal_pub
 
+        self.R = None
+        self.t = None
+
+    def transform_point(self, point, forward=True):
+        if self.R is None:
+            return point
+
+        point_xy = np.array([point[0], point[1]])
+        if forward:
+            new_point_xy = self.R @ point_xy + self.t
+            new_point_theta = point[2] + np.arctan2(self.R[1, 0], self.R[0, 0])
+            return np.concatenate((new_point_xy, [new_point_theta]))
+        else:
+            new_point_xy = self.R.T @ (point_xy - self.t)
+            new_point_theta = point[2] - np.arctan2(self.R[1, 0], self.R[0, 0])
+            return np.concatenate((new_point_xy, [new_point_theta]))
+
+    def update_transformation(self, R, t):
+        self.R = R
+        self.t = t
+
     def on_data_available(self, reader):
         for sample in reader.read():
             
@@ -634,11 +681,14 @@ class DataListener(Listener):
             if self.topic_id == self.my_id:  # This is my topic
                 # Process the message
                 if message_type == "goal":
-                    print(f"Received goal message from agent {sending_agent}: x={data['x']}, y={data['y']}, theta={data['theta']}")
+                    # Transform the goal point to this occupancy grid
+                    x, y, theta = self.transform_point([data['x'], data['y'], data['theta']], forward=False)
+
+                    print(f"Received goal message from agent {sending_agent}: x={x}, y={y}, theta={theta}")
                     goal_msg = Pose2D()
-                    goal_msg.x = data['x']
-                    goal_msg.y = data['y']
-                    goal_msg.theta = data['theta']
+                    goal_msg.x = x
+                    goal_msg.y = y
+                    goal_msg.theta = theta
                     self.goal_pub.publish(goal_msg)
             else:  # We are listening to another agent's topic
                 # TODO
@@ -733,6 +783,9 @@ class EntryExitCommunication:
         self.location_writer = DataWriter(self.publisher, self.location_topic, qos=self.best_effort_qos)
         self.data_writer = DataWriter(self.publisher, self.data_topic, qos=self.reliable_qos)
 
+        # ROS Publisher for publishing transformation matrix
+        self.transform_pub = rospy.Publisher('transformation_matrix', Float64MultiArray, queue_size=10)
+
         # ROS publisher for publishing external goals
         self.goal_pub = rospy.Publisher('/external_goal', Pose2D, queue_size=10)
         self.agent_sub_pub = rospy.Publisher('/agent_to_subscribe', AgentSubscription, queue_size=10)
@@ -801,128 +854,181 @@ class EntryExitCommunication:
         Returns:
             None
         """
+        # find mattbot_mcl package path
+        rospack = rospkg.RosPack()
+        package_path = rospack.get_path('mattbot_mcl')
 
-        # Determine the number of participants on the DDS network
-        for _ in self.built_in_reader.take_iter(timeout=duration(milliseconds=100)):
-            self.num_participants += 1
+        # load the map from the current_map.json file
+        with open(os.path.join(package_path, 'map_json', 'current_map.json'), 'r') as f:
+            data = json.load(f)
+        map_data = data.get('data', {}).get('map', {})
 
-        if self.num_participants == 1:
-            # We are the first participant, we are responsible for getting the map
-            print('I am the first agent to enter the environment')
+        with open(os.path.join(package_path, 'map_json', 'current_map_mod.json'), 'r') as f:
+            mod_data = json.load(f)
+        map_mod_data = mod_data.get('data', {}).get('map', {})
 
-            self.init_reader = None
-            self.init_listener = None
+        self.map_msg.header.frame_id = 'map'
+        self.map_msg.info.width = map_data.get('width')
+        self.map_msg.info.height = map_data.get('height')
+        self.map_msg.info.resolution = map_data.get('resolution')
+        self.map_msg.info.origin.position.x = map_data.get('origin_x')
+        self.map_msg.info.origin.position.y = map_data.get('origin_y')
+        self.map_msg.info.origin.position.z = map_data.get('origin_z')
+        self.map_msg.info.origin.orientation.x = map_data.get('origin_orientation_x')
+        self.map_msg.info.origin.orientation.y = map_data.get('origin_orientation_y')
+        self.map_msg.info.origin.orientation.z = map_data.get('origin_orientation_z')
+        self.map_msg.info.origin.orientation.w = map_data.get('origin_orientation_w')
+        self.map_msg.data = map_data.get('occupancy')
 
-            # find mattbot_mcl package path
-            rospack = rospkg.RosPack()
-            package_path = rospack.get_path('mattbot_mcl')
+        self.map_mod_msg = OccupancyGrid()
+        self.map_mod_msg.header.frame_id = 'map'
+        self.map_mod_msg.info.width = map_mod_data.get('width')
+        self.map_mod_msg.info.height = map_mod_data.get('height')
+        self.map_mod_msg.info.resolution = map_mod_data.get('resolution')
+        self.map_mod_msg.info.origin.position.x = map_mod_data.get('origin_x')
+        self.map_mod_msg.info.origin.position.y = map_mod_data.get('origin_y')
+        self.map_mod_msg.info.origin.position.z = map_mod_data.get('origin_z')
+        self.map_mod_msg.info.origin.orientation.x = map_mod_data.get('origin_orientation_x')
+        self.map_mod_msg.info.origin.orientation.y = map_mod_data.get('origin_orientation_y')
+        self.map_mod_msg.info.origin.orientation.z = map_mod_data.get('origin_orientation_z')
+        self.map_mod_msg.info.origin.orientation.w = map_mod_data.get('origin_orientation_w')
+        self.map_mod_msg.data = map_mod_data.get('occupancy')
 
-            # load the map from the current_map.json file
-            with open(os.path.join(package_path, 'map_json', 'current_map.json'), 'r') as f:
-                data = json.load(f)
-            map_data = data.get('data', {}).get('map', {})
+        self.map_md_msg.map_load_time = rospy.Time.now()
+        self.map_md_msg.resolution = map_data.get('resolution')
+        self.map_md_msg.width = map_data.get('width')
+        self.map_md_msg.height = map_data.get('height')
+        self.map_md_msg.origin.position.x = map_data.get('origin_x')
+        self.map_md_msg.origin.position.y = map_data.get('origin_y')
+        self.map_md_msg.origin.position.z = map_data.get('origin_z')
+        self.map_md_msg.origin.orientation.x = map_data.get('origin_orientation_x')
+        self.map_md_msg.origin.orientation.y = map_data.get('origin_orientation_y')
+        self.map_md_msg.origin.orientation.z = map_data.get('origin_orientation_z')
+        self.map_md_msg.origin.orientation.w = map_data.get('origin_orientation_w')
 
-            with open(os.path.join(package_path, 'map_json', 'current_map_mod.json'), 'r') as f:
-                mod_data = json.load(f)
-            map_mod_data = mod_data.get('data', {}).get('map', {})
+        # self.entry_exit_listener.update_map(self.map_msg, self.map_mod_msg, self.map_md_msg)
 
-            self.map_msg.header.frame_id = 'map'
-            self.map_msg.info.width = map_data.get('width')
-            self.map_msg.info.height = map_data.get('height')
-            self.map_msg.info.resolution = map_data.get('resolution')
-            self.map_msg.info.origin.position.x = map_data.get('origin_x')
-            self.map_msg.info.origin.position.y = map_data.get('origin_y')
-            self.map_msg.info.origin.position.z = map_data.get('origin_z')
-            self.map_msg.info.origin.orientation.x = map_data.get('origin_orientation_x')
-            self.map_msg.info.origin.orientation.y = map_data.get('origin_orientation_y')
-            self.map_msg.info.origin.orientation.z = map_data.get('origin_orientation_z')
-            self.map_msg.info.origin.orientation.w = map_data.get('origin_orientation_w')
-            self.map_msg.data = map_data.get('occupancy')
+        # Publish the map and map metadata for ROS nodes
+        self.map_publisher.publish(self.map_msg)
+        self.map_mod_publisher.publish(self.map_mod_msg)
+        self.map_md_publisher.publish(self.map_md_msg)
 
-            self.map_mod_msg = OccupancyGrid()
-            self.map_mod_msg.header.frame_id = 'map'
-            self.map_mod_msg.info.width = map_mod_data.get('width')
-            self.map_mod_msg.info.height = map_mod_data.get('height')
-            self.map_mod_msg.info.resolution = map_mod_data.get('resolution')
-            self.map_mod_msg.info.origin.position.x = map_mod_data.get('origin_x')
-            self.map_mod_msg.info.origin.position.y = map_mod_data.get('origin_y')
-            self.map_mod_msg.info.origin.position.z = map_mod_data.get('origin_z')
-            self.map_mod_msg.info.origin.orientation.x = map_mod_data.get('origin_orientation_x')
-            self.map_mod_msg.info.origin.orientation.y = map_mod_data.get('origin_orientation_y')
-            self.map_mod_msg.info.origin.orientation.z = map_mod_data.get('origin_orientation_z')
-            self.map_mod_msg.info.origin.orientation.w = map_mod_data.get('origin_orientation_w')
-            self.map_mod_msg.data = map_mod_data.get('occupancy')
+        print("Map retrieved from saved file")
 
-            self.map_md_msg.map_load_time = rospy.Time.now()
-            self.map_md_msg.resolution = map_data.get('resolution')
-            self.map_md_msg.width = map_data.get('width')
-            self.map_md_msg.height = map_data.get('height')
-            self.map_md_msg.origin.position.x = map_data.get('origin_x')
-            self.map_md_msg.origin.position.y = map_data.get('origin_y')
-            self.map_md_msg.origin.position.z = map_data.get('origin_z')
-            self.map_md_msg.origin.orientation.x = map_data.get('origin_orientation_x')
-            self.map_md_msg.origin.orientation.y = map_data.get('origin_orientation_y')
-            self.map_md_msg.origin.orientation.z = map_data.get('origin_orientation_z')
-            self.map_md_msg.origin.orientation.w = map_data.get('origin_orientation_w')
-            
-            self.entry_exit_listener.update_map(self.map_msg, self.map_mod_msg, self.map_md_msg)
+        # Now get correspondance points
+        self.known_points = []
+        package_path = rospack.get_path('mattbot_dds')
+        with open(os.path.join(package_path, 'scripts', 'known_points.txt'), 'r') as f:
+            for line in f:
+                x, y = line.split(',')
+                self.known_points.append((float(x), float(y)))
 
-            # Publish the map and map metadata for ROS nodes
-            self.map_publisher.publish(self.map_msg)
-            self.map_mod_publisher.publish(self.map_mod_msg)
-            self.map_md_publisher.publish(self.map_md_msg)
+        self.entry_exit_listener.update_known_points(self.known_points)
 
-            print("Map retrieved from saved file")
+        self.enter_exit_reader = DataReader(self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener, qos=self.reliable_qos)
+        self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener, qos=self.reliable_qos)
 
-            # Start the readers now that we have the map
-            self.enter_exit_reader = DataReader(self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener, qos=self.reliable_qos)
-            self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener, qos=self.reliable_qos)
-            self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener, qos=self.best_effort_qos)
-            
-        else:
-            # We are not the first participant, we will get the map from one of the other agents
-            print('I am not the first agent to enter the environment')
+        # Broadcast an entry message
+        entry_message = EntryExit(int(self.my_id), AGENT_TYPE, 'enter', AGENT_CAPABILITIES, AGENT_MESSAGE_TYPES, self.my_ip, int(time.time()))
+        self.enter_exit_writer.write(entry_message)
 
-            # We start the readers now since we will need them to access map information
-            self.enter_exit_reader = DataReader(self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener, qos=self.reliable_qos)
-            self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener, qos=self.reliable_qos)
+        # Wait for the reference points to become available
+        num_tries = 0
+        while not self.init_listener.known_points_available() and num_tries < 6:
+            print("No Map yet...")
+            time.sleep(1)
+            if not self.init_listener.known_points_available():
+                entry_message.timestamp = int(time.time())
+                self.enter_exit_writer.write(entry_message)
+                num_tries += 1
 
-            # Broadcast an entry message
-            entry_message = EntryExit(int(self.my_id), AGENT_TYPE, 'enter', AGENT_CAPABILITIES, AGENT_MESSAGE_TYPES, self.my_ip, int(time.time()))
-            self.enter_exit_writer.write(entry_message)
-
-            # Wait for the map to become available
-            while not self.init_listener.map_available():
-                print("No Map yet...")
-                time.sleep(1)
-                if not self.init_listener.map_available():
-                    entry_message.timestamp = int(time.time())
-                    self.enter_exit_writer.write(entry_message)
-
+        if self.init_listener.known_points_available():
             # Store the map, map metadata, and agents
-            self.map_msg, self.map_mod_msg, self.map_md_msg = self.init_listener.get_map()
+            self.reference_known_points = self.init_listener.get_known_points()
             self.agents = self.init_listener.get_agents()
-
-            # Update the entry/exit listener with the map
-            self.entry_exit_listener.update_map(self.map_msg, self.map_mod_msg, self.map_md_msg)
 
             # Update the agents in the entry/exit listener
             self.entry_exit_listener.update_agents(agents=self.agents)
+        else: 
+            self.reference_known_points = self.known_points
+        self.create_transform()  # Create the transform from the known points
 
-            # Publish the map and map metadata for ROS nodes
-            self.map_publisher.publish(self.map_msg)
-            self.map_md_publisher.publish(self.map_md_msg)
+        # Update the entry/exit listener with the known points
+        self.entry_exit_listener.update_known_points(self.reference_known_points)
 
-            # Start the heartbeat reader now that we have the map, stop listening for initialization messages
-            self.init_reader = None
-            self.init_listener = None
-            self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener, qos=self.best_effort_qos)
+        # Start the heartbeat reader now that we have the map, stop listening for initialization messages
+        self.init_reader = None
+        self.init_listener = None
+        self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener, qos=self.best_effort_qos)
 
-            # Send confirmation message to entry_exit topic
-            entry_message = EntryExit(int(self.my_id), AGENT_TYPE, 'initialized', AGENT_CAPABILITIES, AGENT_MESSAGE_TYPES, self.my_ip, int(time.time()))
-            self.enter_exit_writer.write(entry_message)
+        # Send confirmation message to entry_exit topic
+        entry_message = EntryExit(int(self.my_id), AGENT_TYPE, 'initialized', AGENT_CAPABILITIES, AGENT_MESSAGE_TYPES, self.my_ip, int(time.time()))
+        self.enter_exit_writer.write(entry_message)
 
-            print("Initialization complete")
+        print("Initialization complete")
+
+    def create_transform(self):
+        """
+        Determines the transform from my map to the reference map
+        """
+        self.R = None
+        self.t = None
+        if self.known_points == self.reference_known_points:
+            return
+
+        # Find the transform from the known points
+        known_points = np.array(self.known_points)
+        reference_known_points = np.array(self.reference_known_points)
+
+        centroid1 = np.mean(known_points, axis=0)
+        centroid2 = np.mean(reference_known_points, axis=0)
+        centered_points1 = known_points - centroid1
+        centered_points2 = reference_known_points - centroid2
+
+        H = np.dot(centered_points1, centered_points2)
+        U, S, Vt = np.linalg.svd(H)
+        R = Vt.T @ U.T
+
+        if np.linalg.det(R) < 0:
+            Vt[1, :] *= -1
+            R = Vt.T @ U.T
+
+        t = centroid2 - R @ centroid1
+
+        self.R = R
+        self.t = t
+
+        self.heartbeat_listener.update_transformation(R, t)
+
+        # Now publish the transformation matrix
+        transform_msg = Float64MultiArray()
+        transform_msg.data = np.concatenate((R.flatten(), t))
+        self.transform_pub.publish(transform_msg)
+
+    def transform_point(self, point, forward=True):
+        """
+        Transforms a point from the current map to the reference map or vice versa
+
+        Parameters:
+        - point (tuple): The point to be transformed.
+        - forward (bool): True if transforming from current map to reference map, False otherwise.
+
+        Returns:
+        - tuple: The transformed point.
+        """
+        if self.R is None:
+            return point
+
+        point_xy = np.array([point[0], point[1]])
+        if forward:
+            new_point_xy = self.R @ point_xy + self.t
+            new_point_theta = point[2] + np.arctan2(self.R[1, 0], self.R[0, 0])
+            return np.concatenate((new_point_xy, [new_point_theta]))
+        else:
+            new_point_xy = self.R.T @ (point_xy - self.t)
+            new_point_theta = point[2] - np.arctan2(self.R[1, 0], self.R[0, 0])
+            return np.concatenate((new_point_xy, [new_point_theta]))
+
 
     def run(self):
         """
@@ -1064,6 +1170,7 @@ class EntryExitCommunication:
                                 if 'agent_id' not in list(self.location_readers.keys()):
                                     new_location_topic = Topic(self.participant, 'LocationTopic' + str(agent_id), Location)
                                     self.location_listeners[agent_id] = LocationListener(self.my_id)
+                                    self.location_listeners[agent_id].update_transformation(self.R, self.t)
                                     self.location_readers[agent_id] = DataReader(self.subscriber, new_location_topic, listener=self.location_listeners[agent_id], qos=self.best_effort_qos)
                 
                                     # new_data_topic = Topic(self.participant, 'DataTopic' + str(agent_id), DataMessage)
