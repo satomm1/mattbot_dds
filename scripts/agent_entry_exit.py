@@ -204,18 +204,6 @@ class EntryExitListener(Listener):
                     else:
                         agents_message = json.dumps("")
 
-                    map_dict = message_converter.convert_ros_message_to_dictionary(self.map_msg)
-                    map_json = json.dumps(map_dict)
-                    map_mod_dict = message_converter.convert_ros_message_to_dictionary(self.map_mod_msg)
-                    map_mod_json = json.dumps(map_mod_dict)
-                    map_md_dict = message_converter.convert_ros_message_to_dictionary(self.map_md_msg)
-                    map_md_json = json.dumps(map_md_dict)
-
-                    if int(sample.agent_id) >= SENSOR_AGENT_START:
-                        blank_map = OccupancyGrid()
-                        map_dict = message_converter.convert_ros_message_to_dictionary(blank_map)
-                        map_json = json.dumps(map_dict)
-
                     known_points_json = json.dumps(self.known_points)
                     init_message = Initialization(target_agent=sample.agent_id, sending_agent=sending_agent, agents=agents_message, known_points=known_points_json)
                     self.init_writer.write(init_message)
@@ -904,7 +892,7 @@ class EntryExitCommunication:
         # Update the entry/exit listener with the known points
         self.entry_exit_listener.update_known_points(self.reference_known_points)
 
-        # Start the heartbeat reader now that we have the map, stop listening for initialization messages
+        # Start the heartbeat reader now that we have the reference points, stop listening for initialization messages
         self.init_reader = None
         self.init_listener = None
         self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener, qos=self.best_effort_qos)
@@ -994,7 +982,7 @@ class EntryExitCommunication:
         centered_points1 = known_points - centroid1
         centered_points2 = reference_known_points - centroid2
 
-        H = np.dot(centered_points1, centered_points2)
+        H = np.dot(centered_points1.T, centered_points2)
         U, S, Vt = np.linalg.svd(H)
         R = Vt.T @ U.T
 
