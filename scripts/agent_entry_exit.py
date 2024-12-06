@@ -26,6 +26,7 @@ import hashlib
 import socket
 import json
 import requests
+import numpy as np
 
 # Constants (Set depending on the agent)
 HEARTBEAT_PERIOD = 10    # seconds
@@ -215,7 +216,8 @@ class EntryExitListener(Listener):
                         map_dict = message_converter.convert_ros_message_to_dictionary(blank_map)
                         map_json = json.dumps(map_dict)
 
-                    init_message = Initialization(target_agent=sample.agent_id, sending_agent=sending_agent, agents=agents_message, map=map_json, map_mod=map_mod_json, map_md=map_md_json)
+                    known_points_json = json.dumps(self.known_points)
+                    init_message = Initialization(target_agent=sample.agent_id, sending_agent=sending_agent, agents=agents_message, known_points=known_points_json)
                     self.init_writer.write(init_message)
 
                     print(f'Sent initialization message to agent {sample.agent_id}')
