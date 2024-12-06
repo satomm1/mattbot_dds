@@ -854,6 +854,67 @@ class EntryExitCommunication:
         Returns:
             None
         """
+        # Load the map from the current_map.json file and publish it
+        self.load_map()
+        
+        # Now get reference points
+        self.known_points = []
+        rospack = rospkg.RosPack()
+        package_path = rospack.get_path('mattbot_dds')
+        with open(os.path.join(package_path, 'scripts', 'known_points.txt'), 'r') as f:
+            for line in f:
+                x, y = line.split(',')
+                self.known_points.append((float(x), float(y)))
+
+        self.entry_exit_listener.update_known_points(self.known_points)
+
+        self.enter_exit_reader = DataReader(self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener, qos=self.reliable_qos)
+        self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener, qos=self.reliable_qos)
+
+        # Broadcast an entry message
+        entry_message = EntryExit(int(self.my_id), AGENT_TYPE, 'enter', AGENT_CAPABILITIES, AGENT_MESSAGE_TYPES, self.my_ip, int(time.time()))
+        self.enter_exit_writer.write(entry_message)
+
+        # Wait for the reference points to become available
+        num_tries = 0
+        while not self.init_listener.known_points_available() and num_tries < 6:
+            print("Reference Points not yet received...")
+            time.sleep(1)
+            if not self.init_listener.known_points_available():
+                entry_message.timestamp = int(time.time())
+                self.enter_exit_writer.write(entry_message)
+                num_tries += 1
+
+        if self.init_listener.known_points_available():
+            print("I am not the first agent, received reference points")
+
+            # Store the map, map metadata, and agents
+            self.reference_known_points = self.init_listener.get_known_points()
+            self.agents = self.init_listener.get_agents()
+
+            # Update the agents in the entry/exit listener
+            self.entry_exit_listener.update_agents(agents=self.agents)
+        else: 
+            print("I am the first agent, my map will be the reference map")
+            self.reference_known_points = self.known_points
+        self.create_transform()  # Create the transform from the known points
+
+        # Update the entry/exit listener with the known points
+        self.entry_exit_listener.update_known_points(self.reference_known_points)
+
+        # Start the heartbeat reader now that we have the map, stop listening for initialization messages
+        self.init_reader = None
+        self.init_listener = None
+        self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener, qos=self.best_effort_qos)
+
+        # Send confirmation message to entry_exit topic
+        entry_message = EntryExit(int(self.my_id), AGENT_TYPE, 'initialized', AGENT_CAPABILITIES, AGENT_MESSAGE_TYPES, self.my_ip, int(time.time()))
+        self.enter_exit_writer.write(entry_message)
+
+        print("Initialization complete")
+
+    def load_map(self):
+
         # find mattbot_mcl package path
         rospack = rospkg.RosPack()
         package_path = rospack.get_path('mattbot_mcl')
@@ -906,66 +967,12 @@ class EntryExitCommunication:
         self.map_md_msg.origin.orientation.z = map_data.get('origin_orientation_z')
         self.map_md_msg.origin.orientation.w = map_data.get('origin_orientation_w')
 
-        # self.entry_exit_listener.update_map(self.map_msg, self.map_mod_msg, self.map_md_msg)
-
         # Publish the map and map metadata for ROS nodes
         self.map_publisher.publish(self.map_msg)
         self.map_mod_publisher.publish(self.map_mod_msg)
         self.map_md_publisher.publish(self.map_md_msg)
 
-        print("Map retrieved from saved file")
-
-        # Now get correspondance points
-        self.known_points = []
-        package_path = rospack.get_path('mattbot_dds')
-        with open(os.path.join(package_path, 'scripts', 'known_points.txt'), 'r') as f:
-            for line in f:
-                x, y = line.split(',')
-                self.known_points.append((float(x), float(y)))
-
-        self.entry_exit_listener.update_known_points(self.known_points)
-
-        self.enter_exit_reader = DataReader(self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener, qos=self.reliable_qos)
-        self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener, qos=self.reliable_qos)
-
-        # Broadcast an entry message
-        entry_message = EntryExit(int(self.my_id), AGENT_TYPE, 'enter', AGENT_CAPABILITIES, AGENT_MESSAGE_TYPES, self.my_ip, int(time.time()))
-        self.enter_exit_writer.write(entry_message)
-
-        # Wait for the reference points to become available
-        num_tries = 0
-        while not self.init_listener.known_points_available() and num_tries < 6:
-            print("No Map yet...")
-            time.sleep(1)
-            if not self.init_listener.known_points_available():
-                entry_message.timestamp = int(time.time())
-                self.enter_exit_writer.write(entry_message)
-                num_tries += 1
-
-        if self.init_listener.known_points_available():
-            # Store the map, map metadata, and agents
-            self.reference_known_points = self.init_listener.get_known_points()
-            self.agents = self.init_listener.get_agents()
-
-            # Update the agents in the entry/exit listener
-            self.entry_exit_listener.update_agents(agents=self.agents)
-        else: 
-            self.reference_known_points = self.known_points
-        self.create_transform()  # Create the transform from the known points
-
-        # Update the entry/exit listener with the known points
-        self.entry_exit_listener.update_known_points(self.reference_known_points)
-
-        # Start the heartbeat reader now that we have the map, stop listening for initialization messages
-        self.init_reader = None
-        self.init_listener = None
-        self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener, qos=self.best_effort_qos)
-
-        # Send confirmation message to entry_exit topic
-        entry_message = EntryExit(int(self.my_id), AGENT_TYPE, 'initialized', AGENT_CAPABILITIES, AGENT_MESSAGE_TYPES, self.my_ip, int(time.time()))
-        self.enter_exit_writer.write(entry_message)
-
-        print("Initialization complete")
+        print("Map loaded")
 
     def create_transform(self):
         """
