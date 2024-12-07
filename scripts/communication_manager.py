@@ -103,7 +103,7 @@ class SelfDataListener(Listener):
             if self.topic_id == self.my_id:  # This is my topic, just a check
                 # Process the message
                 if message_type == "goal":
-                    new_points = self.transform_points([data['x'], data['y'], data['theta']], forward=False)
+                    new_points = self.transform_point([data['x'], data['y'], data['theta']], forward=False)
                     x, y, theta = new_points
                     print(f"Received goal message from agent {sending_agent}: x={x}, y={y}, theta={theta}")
                     goal_msg = Pose2D()
@@ -321,8 +321,8 @@ class CommManager:
         transformation_matrix = data.data
 
         # Reshape the transformation matrix
-        self.R = transformation_matrix[:4].reshape(2, 2)
-        self.t = transformation_matrix[4:]
+        self.R = np.array(transformation_matrix[:4]).reshape(2, 2)
+        self.t = np.array(transformation_matrix[4:])
 
         self.data_listener.update_transformation(self.R, self.t)
 

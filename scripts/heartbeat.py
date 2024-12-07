@@ -79,8 +79,8 @@ class HeartbeatPublisher:
         transformation_matrix = data.data
 
         # Reshape the transformation matrix
-        self.R = transformation_matrix[:4].reshape(2, 2)
-        self.t = transformation_matrix[4:]
+        self.R = np.array(transformation_matrix[:4]).reshape(2, 2)
+        self.t = np.array(transformation_matrix[4:])
 
     def transform_point(self, point, forward=True):
         if self.R is None:

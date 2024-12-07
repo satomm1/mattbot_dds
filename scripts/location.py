@@ -15,6 +15,7 @@ from cyclonedds.builtin import BuiltinDataReader, BuiltinTopicDcpsParticipant
 from dataclasses import dataclass
 import time
 import os
+import numpy as np
 
 LOCATION_PERIOD = 0.75    # seconds
 
@@ -80,8 +81,8 @@ class LocationPublisher:
         transformation_matrix = data.data
 
         # Reshape the transformation matrix
-        self.R = transformation_matrix[:4].reshape(2, 2)
-        self.t = transformation_matrix[4:]
+        self.R = np.array(transformation_matrix[:4]).reshape(2, 2)
+        self.t = np.array(transformation_matrix[4:])
 
     def transform_point(self, point, forward=True):
         if self.R is None:

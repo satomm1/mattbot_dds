@@ -157,8 +157,8 @@ class GoalReader:
         transformation_matrix = data.data
 
         # Reshape the transformation matrix
-        self.R = transformation_matrix[:4].reshape(2, 2)
-        self.t = transformation_matrix[4:]
+        self.R = np.array(transformation_matrix[:4]).reshape(2, 2)
+        self.t = np.array(transformation_matrix[4:])
 
         self.data_listener.update_transformation_matrix(self.R, self.t)
 
