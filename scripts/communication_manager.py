@@ -143,7 +143,6 @@ class OtherDataListener(Listener):
         self.R = R
         self.t = t
 
-    # TODO: Convert to proper occupancy grid frame
     def on_data_available(self, reader):
         for sample in reader.read():
             
@@ -156,6 +155,14 @@ class OtherDataListener(Listener):
                 data = json.loads(sample.data)
                 if message_type == "detected_object":
                     new_object = message_converter.convert_dictionary_to_ros_message('mattbot_image_detection/DetectedObject', data)
+                    
+                    # Now convert pose of detected object to my frame
+                    x = new_object.pose.position.x
+                    y = new_object.pose.position.y
+                    new_point = self.transform_point([x, y, 0], forward=False)
+                    new_object.pose.position.x = new_point[0]
+                    new_object.pose.position.y = new_point[1]
+
                     self.object_publisher.publish(new_object)
                     print("Received object from agent " + str(self.topic_id))
                 elif message_type == "sensor_detected_objects":
@@ -170,12 +177,14 @@ class OtherDataListener(Listener):
                     object_array.sending_agent = sending_agent
                     object_array.objects = []
                     for i in range(len(x)):
+                        new_point = self.transform_point([x[i], y[i], 0], forward=False)
+
                         detected_object = DetectedObject()
                         detected_object.class_name = class_name[i]
                         detected_object.probability = 1.0
                         detected_object_pose = Pose()
-                        detected_object_pose.position.x = x[i]
-                        detected_object_pose.position.y = y[i]
+                        detected_object_pose.position.x = new_point[0]
+                        detected_object_pose.position.y = new_point[1]
                         detected_object_pose.position.z = 0
                         detected_object_pose.orientation.w = 1
                         detected_object.pose = detected_object_pose
@@ -188,6 +197,15 @@ class OtherDataListener(Listener):
 
                 elif message_type == "path":
                     new_path = message_converter.convert_dictionary_to_ros_message('nav_msgs/Path', data)
+
+                    # Now convert poses of path to my frame
+                    for i in range(len(new_path.poses)):
+                        x = new_path.poses[i].pose.position.x
+                        y = new_path.poses[i].pose.position.y
+                        new_point = self.transform_point([x, y, 0], forward=False)
+                        new_path.poses[i].pose.position.x = new_point[0]
+                        new_path.poses[i].pose.position.y = new_point[1]
+
                     new_agent_path = AgentPath()
                     new_agent_path.agentID.data = self.topic_id
                     new_agent_path.path = new_path
