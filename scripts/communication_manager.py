@@ -26,6 +26,7 @@ import hashlib
 import socket
 import json
 import requests
+import numpy as np
 
 ##################################################
 # This script is used to process and send DataMessages.
@@ -457,7 +458,8 @@ class CommManager:
 
 
 if __name__ == '__main__':
-    time.sleep(5)  # Wait
+    
     manager = CommManager()
+    time.sleep(5)  # Wait
     rospy.on_shutdown(manager.shutdown)
     manager.run()

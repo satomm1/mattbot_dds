@@ -15,6 +15,7 @@ from cyclonedds.builtin import BuiltinDataReader, BuiltinTopicDcpsParticipant
 from dataclasses import dataclass
 import time
 import os
+import numpy as np
 
 HEARTBEAT_PERIOD = 10    # seconds
 HEARTBEAT_TIMEOUT = 31  # seconds
@@ -72,7 +73,7 @@ class HeartbeatPublisher:
 
         self.R = None
         self.t = None
-        transformation_subscriber = rospy.Subscriber('transformation_matrix', Float64MultiArray, self.transformation_callback)
+        transformation_subscriber = rospy.Subscriber('/transformation_matrix', Float64MultiArray, self.transformation_callback)
 
     def transformation_callback(self, data):
         # Get the transformation matrix
@@ -134,7 +135,7 @@ class HeartbeatPublisher:
         rospy.loginfo("Shutting down DDS heartbeat publisher...")
 
 if __name__ == '__main__':
-    time.sleep(HEARTBEAT_PERIOD)
     heartbeat_publisher = HeartbeatPublisher()
+    time.sleep(HEARTBEAT_PERIOD)
     rospy.on_shutdown(heartbeat_publisher.shutdown)
     heartbeat_publisher.run()

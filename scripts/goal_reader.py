@@ -26,6 +26,7 @@ import hashlib
 import socket
 import json
 import requests
+import numpy as np
 
 ##################################################
 # This script is used to process and send DataMessages.
@@ -96,6 +97,7 @@ class SelfDataListener(Listener):
                 self.goal_pub.publish(goal_msg)
 
     def update_transformation_matrix(self, R, t):   
+        
         self.R = R
         self.t = t
 
@@ -123,6 +125,11 @@ class GoalReader:
         self.my_id = os.environ.get('ROBOT_ID')
         self.agents_subscribed = set()
 
+        self.R = None
+        self.t = None
+        transformation_subscriber = rospy.Subscriber('/transformation_matrix', Float64MultiArray, self.transformation_callback)
+
+    def setup_dds(self):
         # Reliable qos
         self.reliable_qos = Qos(
             Policy.Reliability.Reliable(max_blocking_time=duration(milliseconds=10)),
@@ -148,11 +155,8 @@ class GoalReader:
         self.data_listener = SelfDataListener(self.my_id, self.my_id)
         self.data_reader = DataReader(self.subscriber, self.data_topic, listener=self.data_listener, qos=self.reliable_qos)
 
-        self.R = None
-        self.t = None
-        transformation_subscriber = rospy.Subscriber('transformation_matrix', Float64MultiArray, self.transformation_callback)
-
     def transformation_callback(self, data):
+
         # Get the transformation matrix
         transformation_matrix = data.data
 
@@ -171,7 +175,8 @@ class GoalReader:
 
 
 if __name__ == '__main__':
-    time.sleep(5)  # Wait
     goal_reader = GoalReader()
+    # time.sleep(5)  # Wait
+    goal_reader.setup_dds()
     rospy.on_shutdown(goal_reader.shutdown)
     goal_reader.run()
