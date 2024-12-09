@@ -125,11 +125,6 @@ class GoalReader:
         self.my_id = os.environ.get('ROBOT_ID')
         self.agents_subscribed = set()
 
-        self.R = None
-        self.t = None
-        transformation_subscriber = rospy.Subscriber('/transformation_matrix', Float64MultiArray, self.transformation_callback)
-
-    def setup_dds(self):
         # Reliable qos
         self.reliable_qos = Qos(
             Policy.Reliability.Reliable(max_blocking_time=duration(milliseconds=10)),
@@ -155,6 +150,10 @@ class GoalReader:
         self.data_listener = SelfDataListener(self.my_id, self.my_id)
         self.data_reader = DataReader(self.subscriber, self.data_topic, listener=self.data_listener, qos=self.reliable_qos)
 
+        self.R = None
+        self.t = None
+        transformation_subscriber = rospy.Subscriber('/transformation_matrix', Float64MultiArray, self.transformation_callback)
+
     def transformation_callback(self, data):
 
         # Get the transformation matrix
@@ -176,7 +175,5 @@ class GoalReader:
 
 if __name__ == '__main__':
     goal_reader = GoalReader()
-    # time.sleep(5)  # Wait
-    goal_reader.setup_dds()
     rospy.on_shutdown(goal_reader.shutdown)
     goal_reader.run()
