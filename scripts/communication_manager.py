@@ -334,6 +334,7 @@ class CommManager:
         self.cone_subscriber = rospy.Subscriber('/new_cone_map', DetectedObject, self.cone_callback, queue_size=10)
         self.agent_subscriber = rospy.Subscriber('/agent_to_subscribe', AgentSubscription, self.agent_subscription_callback, queue_size=10)
         self.path_subscriber = rospy.Subscriber('/cmd_smoothed_path', Path, self.path_callback, queue_size=10)
+        self.voice_goal_subscriber = rospy.Subscriber('/voice_goal', Pose2D, self.voice_goal_callback, queue_size=10)
 
     def transformation_callback(self, data):
         # Get the transformation matrix
@@ -408,6 +409,24 @@ class CommManager:
             data=json.dumps(message_converter.convert_ros_message_to_dictionary(msg))
         )
         self.data_writer.write(path_message)
+        time.sleep(0.01)
+
+    def voice_goal_callback(self, msg):
+        x = msg.x
+        y = msg.y
+        th = msg.theta
+        new_point = self.transform_point([x, y, th])
+        msg.x = new_point[0]
+        msg.y = new_point[1]
+        msg.theta = new_point[2]
+
+        goal_message = DataMessage(
+            message_type="goal",
+            sending_agent=int(self.my_id),
+            timestamp=int(time.time()),
+            data=json.dumps(message_converter.convert_ros_message_to_dictionary(msg))
+        )
+        self.data_writer.write(goal_message)
         time.sleep(0.01)
 
     def agent_subscription_callback(self, msg):
