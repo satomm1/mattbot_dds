@@ -26,7 +26,7 @@ import json
 import requests
 import numpy as np
 
-from dds_utils import EntryExit, Heartbeat, Initialization, Location, DataMessage
+from dds_utils import EntryExit, Heartbeat, Initialization, Location, DataMessage, reliable_qos, best_effort_qos
 
 # Constants (Set depending on the agent)
 HEARTBEAT_PERIOD = 10    # seconds
@@ -555,19 +555,6 @@ class EntryExitCommunication:
         self.map_mod_publisher = rospy.Publisher('map_mod', OccupancyGrid, queue_size=10)
         self.map_md_publisher = rospy.Publisher('map_metadata', MapMetaData, queue_size=10)
 
-        # Create different policies for the DDS entities
-        self.reliable_qos = Qos(
-            Policy.Reliability.Reliable(max_blocking_time=duration(milliseconds=10)),
-            Policy.Durability.TransientLocal,
-            Policy.History.KeepLast(depth=1)
-        )
-
-        self.best_effort_qos = Qos(
-            Policy.Reliability.BestEffort,
-            Policy.Durability.Volatile,
-            Policy.Liveliness.ManualByParticipant(lease_duration=duration(milliseconds=30000))
-        )
-
         self.lease_duration_ms = 30000
         qos_profile = DomainParticipantQos()
         qos_profile.lease_duration = duration(milliseconds=self.lease_duration_ms)
@@ -585,11 +572,11 @@ class EntryExitCommunication:
         self.data_topic = Topic(self.participant, 'DataTopic' + str(self.my_id), DataMessage)
 
         # Create the DataWriters and DataReaders
-        self.enter_exit_writer = DataWriter(self.publisher, self.entry_exit_topic, qos=self.reliable_qos)
-        # self.heartbeat_writer = DataWriter(self.publisher, self.heartbeat_topic, qos=self.best_effort_qos)
-        self.init_writer = DataWriter(self.publisher, self.init_topic, qos=self.reliable_qos)
-        self.location_writer = DataWriter(self.publisher, self.location_topic, qos=self.best_effort_qos)
-        self.data_writer = DataWriter(self.publisher, self.data_topic, qos=self.reliable_qos)
+        self.enter_exit_writer = DataWriter(self.publisher, self.entry_exit_topic, qos=reliable_qos)
+        # self.heartbeat_writer = DataWriter(self.publisher, self.heartbeat_topic, qos=best_effort_qos)
+        self.init_writer = DataWriter(self.publisher, self.init_topic, qos=reliable_qos)
+        self.location_writer = DataWriter(self.publisher, self.location_topic, qos=best_effort_qos)
+        self.data_writer = DataWriter(self.publisher, self.data_topic, qos=reliable_qos)
 
         # ROS Publisher for publishing transformation matrix
         self.transform_pub = rospy.Publisher('transformation_matrix', Float64MultiArray, queue_size=10)
@@ -610,7 +597,7 @@ class EntryExitCommunication:
         self.heartbeat_reader = None
         self.location_readers = dict()
         self.location_listeners = dict()
-        # self.my_data_reader = DataReader(self.subscriber, self.data_topic, listener=self.my_data_listener, qos=self.reliable_qos)
+        # self.my_data_reader = DataReader(self.subscriber, self.data_topic, listener=self.my_data_listener, qos=reliable_qos)
         self.agent_data_listeners = dict()
         self.agent_data_readers = dict()
 
@@ -663,8 +650,8 @@ class EntryExitCommunication:
 
         self.entry_exit_listener.update_known_points(self.known_points)
 
-        self.enter_exit_reader = DataReader(self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener, qos=self.reliable_qos)
-        self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener, qos=self.reliable_qos)
+        self.enter_exit_reader = DataReader(self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener, qos=reliable_qos)
+        self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener, qos=reliable_qos)
 
         # Broadcast an entry message
         entry_message = EntryExit(int(self.my_id), AGENT_TYPE, 'enter', self.my_ip, int(time.time()))
@@ -719,7 +706,7 @@ class EntryExitCommunication:
         # Start the heartbeat reader now that we have the reference points, stop listening for initialization messages
         self.init_reader = None
         self.init_listener = None
-        self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener, qos=self.best_effort_qos)
+        self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener, qos=best_effort_qos)
 
         # Send confirmation message to entry_exit topic
         entry_message = EntryExit(int(self.my_id), AGENT_TYPE, 'initialized', self.my_ip, int(time.time()))
@@ -949,11 +936,11 @@ class EntryExitCommunication:
                 #                     new_location_topic = Topic(self.participant, 'LocationTopic' + str(agent_id), Location)
                 #                     self.location_listeners[agent_id] = LocationListener(self.my_id)
                 #                     self.location_listeners[agent_id].update_transformation(self.R, self.t)
-                #                     self.location_readers[agent_id] = DataReader(self.subscriber, new_location_topic, listener=self.location_listeners[agent_id], qos=self.best_effort_qos)
+                #                     self.location_readers[agent_id] = DataReader(self.subscriber, new_location_topic, listener=self.location_listeners[agent_id], qos=best_effort_qos)
                 
                 #                     # new_data_topic = Topic(self.participant, 'DataTopic' + str(agent_id), DataMessage)
                 #                     # self.agent_data_listeners[agent_id] = DataListener(self.my_id, agent_id)
-                #                     # self.agent_data_readers[agent_id] = DataReader(self.subscriber, new_data_topic, listener=self.agent_data_listeners[agent_id], qos=self.reliable_qos)
+                #                     # self.agent_data_readers[agent_id] = DataReader(self.subscriber, new_data_topic, listener=self.agent_data_listeners[agent_id], qos=reliable_qos)
 
                 # # Only need to perform this housekeeping if the list of nearby agents has changed
                 # if nearby_agents != prev_nearby_agents:
