@@ -47,6 +47,7 @@ class Initialization(IdlStruct):
         known_points (str): 
     """
     target_agent: int
+    sending_agent: int
     agents: str
     known_points: str
 

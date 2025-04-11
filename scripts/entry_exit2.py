@@ -120,7 +120,7 @@ class EntryExitListener(Listener):
 
                     known_points_json = json.dumps(self.known_points)
 
-                    init_message = Initialization(target_agent=sample.agent_id, agents=agents_message, known_points=known_points_json)
+                    init_message = Initialization(target_agent=sample.agent_id, sending_agent=int(self.my_id), agents=agents_message, known_points=known_points_json)
                     self.init_writer.write(init_message)
 
                     print(f'Sent initialization message to agent {sample.agent_id}')
@@ -136,6 +136,7 @@ class EntryExitListener(Listener):
                         'agent_type': sample.agent_type,
                         'ip_address': sample.ip_address,
                         'hash': new_robot_hash,
+                        'timestamp': sample.timestamp
                     }
 
                     self.update_to_agents = True
@@ -164,7 +165,7 @@ class EntryExitListener(Listener):
             agent_hash = agent_info['hash']
 
             distance = abs(agent_hash - robot_hash)
-            if distance < my_distance:
+            if distance < my_distance and distance != 0:
                 print("I will not provide initialization.")  # I am not the closest robot
                 return False
 
@@ -345,7 +346,7 @@ class InitializationListener(Listener):
         map_md_publisher: Publisher for the map metadata message.
     """
 
-    def __init__(self, my_id,):
+    def __init__(self, my_id):
         super().__init__()
         self.map_received = False
         self.map_msg = OccupancyGrid()
@@ -365,25 +366,16 @@ class InitializationListener(Listener):
         """
         for sample in init_reader.read():
 
-            sending_agent_dict = json.loads(sample.sending_agent)
-            print(f'Initialization message received from agent {sending_agent_dict["id"]}')
+            sending_agent = sample.sending_agent
             # Ignore messages from self
-            if sending_agent_dict['id'] == int(self.my_id):
+            if sending_agent == int(self.my_id):
                 continue
+
+            print(f'Initialization message received from agent {sending_agent}')
 
             # Ignore messages not intended for this agent
             if sample.target_agent != int(self.my_id):
                 continue
-
-            # Add the sending agent to the agents dictionary
-            self.agents[sending_agent_dict['id']] = {
-                'agent_type': sending_agent_dict['agent_type'],
-                'capabilities': sending_agent_dict['capabilities'],
-                'message_types': sending_agent_dict['message_types'],
-                'ip_address': sending_agent_dict['ip_address'],
-                'hash': sending_agent_dict['hash'],
-                'timestamp': sending_agent_dict['timestamp']
-            }
 
             # Load the agents from the initialization message
             agent_dict = json.loads(sample.agents)
@@ -393,8 +385,6 @@ class InitializationListener(Listener):
                     if agent_id != self.my_id:
                         self.agents[int(agent_id)] = {
                             'agent_type': agent_info['agent_type'],
-                            'capabilities': agent_info['capabilities'],
-                            'message_types': agent_info['message_types'],
                             'ip_address': agent_info['ip_address'],
                             'hash': agent_info['hash'],
                             'timestamp': agent_info['timestamp']
@@ -405,7 +395,7 @@ class InitializationListener(Listener):
             self.reference_known_points = known_points
             self.known_points_received = True
 
-            print(f'Initialization message received from agent {sending_agent_dict["id"]}')
+            print("Reference points received through initialization message")
 
     def map_available(self):
         """
@@ -610,7 +600,7 @@ class EntryExitCommunication:
 
         self.entry_exit_listener = EntryExitListener(self.participant, self.publisher, self.subscriber, self.my_id, self.my_ip, self.my_hash, self.init_writer)
         self.heartbeat_listener = HeartbeatListener(self.my_id)
-        self.init_listener = InitializationListener(self.my_id, self.map_publisher, self.map_mod_publisher, self.map_md_publisher)
+        self.init_listener = InitializationListener(self.my_id)
         # self.my_data_listener = DataListener(self.my_id, self.my_id, self.goal_pub)
         self.agent_data_listeners = dict()
 
@@ -677,7 +667,7 @@ class EntryExitCommunication:
         self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener, qos=self.reliable_qos)
 
         # Broadcast an entry message
-        entry_message = EntryExit(int(self.my_id), AGENT_TYPE, 'enter', AGENT_CAPABILITIES, AGENT_MESSAGE_TYPES, self.my_ip, int(time.time()))
+        entry_message = EntryExit(int(self.my_id), AGENT_TYPE, 'enter', self.my_ip, int(time.time()))
         self.enter_exit_writer.write(entry_message)
 
         # Wait for the reference points to become available
@@ -697,15 +687,34 @@ class EntryExitCommunication:
             self.reference_known_points = self.init_listener.get_known_points()
             self.agents = self.init_listener.get_agents()
 
+            # Add myself to the agents dictionary
+            self.agents[int(self.my_id)] = {
+                'agent_type': AGENT_TYPE,
+                'ip_address': self.my_ip,
+                'hash': self.my_hash,
+                'timestamp': int(time.time())
+            }
+
             # Update the agents in the entry/exit listener
             self.entry_exit_listener.update_agents(agents=self.agents)
         else: 
             print("I am the first agent, my map will be the reference map")
             self.reference_known_points = self.known_points
+
+            self.agents[int(self.my_id)] = {
+                'agent_type': AGENT_TYPE,
+                'ip_address': self.my_ip,
+                'hash': self.my_hash,
+                'timestamp': int(time.time())
+            }
+
         self.create_transform()  # Create the transform from the known points
 
         # Update the entry/exit listener with the known points
         self.entry_exit_listener.update_known_points(self.reference_known_points)
+
+        # Update the agents in the entry/exit listener
+        self.entry_exit_listener.update_agents(agents=self.agents)  
 
         # Start the heartbeat reader now that we have the reference points, stop listening for initialization messages
         self.init_reader = None
@@ -713,7 +722,7 @@ class EntryExitCommunication:
         self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener, qos=self.best_effort_qos)
 
         # Send confirmation message to entry_exit topic
-        entry_message = EntryExit(int(self.my_id), AGENT_TYPE, 'initialized', AGENT_CAPABILITIES, AGENT_MESSAGE_TYPES, self.my_ip, int(time.time()))
+        entry_message = EntryExit(int(self.my_id), AGENT_TYPE, 'initialized', self.my_ip, int(time.time()))
         self.enter_exit_writer.write(entry_message)
 
         print("Initialization complete")
@@ -858,32 +867,7 @@ class EntryExitCommunication:
         rate = rospy.Rate(LOCATION_FREQUENCY)
         last_time = int(time.time())
         while not rospy.is_shutdown():
-
             current_time = int(time.time())  # Get the current time
-
-            # # Get current position of the agent and publish to location topic
-            # location_valid = False
-            # try:
-            #     (translation, rotation) = self.trans_listener.lookupTransform("map", "base_footprint", rospy.Time(0))
-            #     x = translation[0]
-            #     y = translation[1]
-            #     euler = tf.transformations.euler_from_quaternion(rotation)
-            #     theta = euler[2]
-
-            #     self.my_location = (x, y, theta)
-            #     location_valid = True
-
-            #     # Publish to this agent's location topic
-            #     location_message = Location(int(self.my_id), current_time, x, y, theta)
-            #     self.location_writer.write(location_message)
-
-            # except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
-            #     # Location not available yet (not yet localized)
-            #     x = None
-            #     y = None
-            #     theta = None
-            #     self.my_location = None
-            #     location_valid = False
 
             # Collect received locations of nearby agents and publish them to a ROS topic
             agent_locations_array = AgentLocationsArray()
@@ -926,100 +910,91 @@ class EntryExitCommunication:
                 
                 # Check for new agents
                 if self.entry_exit_listener.agent_update_available():
-                    self.agents, self.exited_agents, self.lost_agents = self.entry_exit_listener.get_agents()
+                    self.agents = self.entry_exit_listener.get_agents()
                 current_agents_list = list(self.agents.keys())
 
-                # # Send out heartbeat
-                # if location_valid:
-                #     heartbeat_message = Heartbeat(int(self.my_id), current_time, location_valid, x, y, theta)
-                # else:
-                #     heartbeat_message = Heartbeat(int(self.my_id), current_time, location_valid, 0.0, 0.0, 0.0)
-                # self.heartbeat_writer.write(heartbeat_message)
-                # print("Heartbeat sent")
-
                 # Update agents with new heartbeats
-                heartbeats, locations = self.heartbeat_listener.get_heartbeats_and_locations()
+                heartbeats = self.heartbeat_listener.get_heartbeats()
 
                 update_to_active_agents = False
                 for agent_id in heartbeats.keys():
                     if agent_id in current_agents_list:
                         self.agents[agent_id]['timestamp'] = heartbeats[agent_id]
-                    elif agent_id in self.exited_agents.keys():
-                        self.agents[agent_id] = self.exited_agents.pop(agent_id)
-                        self.agents[agent_id]['timestamp'] = heartbeats[agent_id]
-                        update_to_active_agents = True
-                    elif agent_id in self.lost_agents.keys():
-                        self.agents[agent_id] = self.lost_agents.pop(agent_id)
-                        self.agents[agent_id]['timestamp'] = heartbeats[agent_id]
-                        update_to_active_agents = True
                     else:
                         print(f'Detected heartbeat from unknown agent {agent_id}')
                         agent_hash = hash_func(str(agent_id))
+
+                        # FIXME: Add correct agent_type and ip_address
                         self.agents[agent_id] = {
                             'agent_type': 'unknown',
-                            'capabilities': [],
-                            'message_types': [],
                             'ip_address': 'unknown',
                             'hash': agent_hash,
                             'timestamp': heartbeats[agent_id]
                         }
                         update_to_active_agents = True
-                if update_to_active_agents:
-                    self.entry_exit_listener.update_agents(agents=self.agents, exited_agents=self.exited_agents, lost_agents=self.lost_agents)
 
-                # Check for nearby agents
-                nearby_agents = set()
-                for agent_id, location in locations.items():
-                    if location is not None and agent_id in current_agents_list:
-                        x, y, theta = location
-                        self.agents[agent_id]['location'] = (x, y, theta)
+                # # Check for nearby agents
+                # nearby_agents = set()
+                # for agent_id, location in locations.items():
+                #     if location is not None and agent_id in current_agents_list:
+                #         x, y, theta = location
+                #         self.agents[agent_id]['location'] = (x, y, theta)
 
-                        # Determine if the agent is close to the robot
-                        if self.my_location is not None:
-                            distance = ((x - self.my_location[0])**2 + (y - self.my_location[1])**2)**0.5
-                            if distance < DISTANCE_THRESHOLD:
-                                nearby_agents.add(agent_id)
-                                if 'agent_id' not in list(self.location_readers.keys()):
-                                    new_location_topic = Topic(self.participant, 'LocationTopic' + str(agent_id), Location)
-                                    self.location_listeners[agent_id] = LocationListener(self.my_id)
-                                    self.location_listeners[agent_id].update_transformation(self.R, self.t)
-                                    self.location_readers[agent_id] = DataReader(self.subscriber, new_location_topic, listener=self.location_listeners[agent_id], qos=self.best_effort_qos)
+                #         # Determine if the agent is close to the robot
+                #         if self.my_location is not None:
+                #             distance = ((x - self.my_location[0])**2 + (y - self.my_location[1])**2)**0.5
+                #             if distance < DISTANCE_THRESHOLD:
+                #                 nearby_agents.add(agent_id)
+                #                 if 'agent_id' not in list(self.location_readers.keys()):
+                #                     new_location_topic = Topic(self.participant, 'LocationTopic' + str(agent_id), Location)
+                #                     self.location_listeners[agent_id] = LocationListener(self.my_id)
+                #                     self.location_listeners[agent_id].update_transformation(self.R, self.t)
+                #                     self.location_readers[agent_id] = DataReader(self.subscriber, new_location_topic, listener=self.location_listeners[agent_id], qos=self.best_effort_qos)
                 
-                                    # new_data_topic = Topic(self.participant, 'DataTopic' + str(agent_id), DataMessage)
-                                    # self.agent_data_listeners[agent_id] = DataListener(self.my_id, agent_id)
-                                    # self.agent_data_readers[agent_id] = DataReader(self.subscriber, new_data_topic, listener=self.agent_data_listeners[agent_id], qos=self.reliable_qos)
+                #                     # new_data_topic = Topic(self.participant, 'DataTopic' + str(agent_id), DataMessage)
+                #                     # self.agent_data_listeners[agent_id] = DataListener(self.my_id, agent_id)
+                #                     # self.agent_data_readers[agent_id] = DataReader(self.subscriber, new_data_topic, listener=self.agent_data_listeners[agent_id], qos=self.reliable_qos)
 
-                # Only need to perform this housekeeping if the list of nearby agents has changed
-                if nearby_agents != prev_nearby_agents:
-                    prev_nearby_agents = nearby_agents
+                # # Only need to perform this housekeeping if the list of nearby agents has changed
+                # if nearby_agents != prev_nearby_agents:
+                #     prev_nearby_agents = nearby_agents
                    
-                    # Remove readers that are no longer needed
-                    agent_list = list(self.location_readers.keys())
-                    for agent_id in agent_list:
-                        if agent_id not in nearby_agents:
-                            self.location_listeners[agent_id] = None
-                            self.location_readers[agent_id] = None
-                            self.location_listeners.pop(agent_id)
-                            self.location_readers.pop(agent_id)
+                #     # Remove readers that are no longer needed
+                #     agent_list = list(self.location_readers.keys())
+                #     for agent_id in agent_list:
+                #         if agent_id not in nearby_agents:
+                #             self.location_listeners[agent_id] = None
+                #             self.location_readers[agent_id] = None
+                #             self.location_listeners.pop(agent_id)
+                #             self.location_readers.pop(agent_id)
 
-                            # self.agent_data_listeners[agent_id] = None
-                            # self.agent_data_readers[agent_id] = None
-                            # self.agent_data_listeners.pop(agent_id)
-                            # self.agent_data_readers.pop(agent_id)
+                #             # self.agent_data_listeners[agent_id] = None
+                #             # self.agent_data_readers[agent_id] = None
+                #             # self.agent_data_listeners.pop(agent_id)
+                #             # self.agent_data_readers.pop(agent_id)
 
                 # Check Periodically for Dead Agents
                 dead_agents = []
                 for agent_id, agent_info in self.agents.items():
+
+                    # Skip self
+                    if agent_id == int(self.my_id):
+                        continue
+
                     time_difference = current_time - agent_info['timestamp']
 
                     if time_difference > HEARTBEAT_TIMEOUT:
                         # Agent has timed out
                         print(f'Agent {agent_id} has timed out')
                         dead_agents.append(agent_id)              
+                
+                # Remove Dead Agents
                 for agent_id in dead_agents:
-                    self.lost_agents[agent_id] = self.agents.pop(agent_id)
-                if dead_agents:
-                    self.entry_exit_listener.update_agents(agents=self.agents, lost_agents=self.lost_agents)
+                    self.agents.pop(agent_id)
+
+                # Update the entry/exit listener with the new agents
+                if update_to_active_agents or dead_agents:
+                    self.entry_exit_listener.update_agents(agents=self.agents)
 
                 if len(self.agents) > 0:
                     agent_sub_list = AgentSubscription()
@@ -1031,9 +1006,9 @@ class EntryExitCommunication:
             rate.sleep()
 
     def shutdown(self):
-        print('Shutting down...')
+        print('\nSending exit message...')
         # Write exit message
-        exit_message = EntryExit(int(self.my_id), AGENT_TYPE, 'exit', [], [], self.my_ip, int(time.time()))
+        exit_message = EntryExit(int(self.my_id), AGENT_TYPE, 'exit', self.my_ip, int(time.time()))
         self.enter_exit_writer.write(exit_message)
 
 
