@@ -659,8 +659,8 @@ class EntryExitCommunication:
 
         # Wait for the reference points to become available
         num_tries = 0
-        while not self.init_listener.known_points_available() and num_tries < 6:
-            print("Reference Points not yet received...")
+        while not self.init_listener.known_points_available() and num_tries < 10:
+            print("Reference Points not yet received (attempt {0}/10)".format(num_tries+1))
             time.sleep(1)
             if not self.init_listener.known_points_available():
                 entry_message.timestamp = int(time.time())

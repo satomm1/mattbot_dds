@@ -18,7 +18,7 @@ import os
 import numpy as np
 import socket
 
-from dds_utils import Heartbeat
+from dds_utils import Heartbeat, best_effort_qos
 
 HEARTBEAT_PERIOD = 10    # seconds
 HEARTBEAT_TIMEOUT = 31  # seconds
@@ -39,19 +39,6 @@ class HeartbeatPublisher:
         s.close()
         print(f"My IP address is {self.my_ip}")
 
-        # Reliable qos
-        self.reliable_qos = Qos(
-            Policy.Reliability.Reliable(max_blocking_time=duration(milliseconds=1)),
-            Policy.Durability.TransientLocal,
-            Policy.History.KeepLast(depth=1)
-        )
-
-        self.best_effort_qos = Qos(
-            Policy.Reliability.BestEffort,
-            Policy.Durability.Volatile,
-            Policy.Liveliness.ManualByParticipant(lease_duration=duration(milliseconds=30000))
-        )
-
         self.lease_duration_ms = 30000
         qos_profile = DomainParticipantQos()
         qos_profile.lease_duration = duration(milliseconds=self.lease_duration_ms)
@@ -61,7 +48,7 @@ class HeartbeatPublisher:
         self.publisher = Publisher(self.participant)
 
         self.heartbeat_topic = Topic(self.participant, 'HeartbeatTopic', Heartbeat)
-        self.heartbeat_writer = DataWriter(self.publisher, self.heartbeat_topic, qos=self.best_effort_qos)
+        self.heartbeat_writer = DataWriter(self.publisher, self.heartbeat_topic, qos=best_effort_qos)
 
         self.trans_listener = tf.TransformListener()
 
