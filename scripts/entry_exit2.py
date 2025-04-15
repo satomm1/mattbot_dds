@@ -3,7 +3,7 @@ from nav_msgs.msg import OccupancyGrid, MapMetaData, Path
 from mattbot_dds.msg import AgentLocationsArray
 from mattbot_dds.msg import AgentSubscription
 from geometry_msgs.msg import Pose, Pose2D
-from std_msgs.msg import Header, Int32, Float64MultiArray
+from std_msgs.msg import Header, Int32, Float64MultiArray, Int16MultiArray
 from rospy_message_converter import message_converter
 import tf
 import rospkg
@@ -74,6 +74,7 @@ class EntryExitListener(Listener):
         self.subscriber = subscriber
 
         self.agents = dict()
+        self.exited_agents = dict()
         self.agents[my_hash] = {
             'agent_type': AGENT_TYPE,
             'ip_address': my_ip,
@@ -123,7 +124,7 @@ class EntryExitListener(Listener):
                     init_message = Initialization(target_agent=sample.agent_id, sending_agent=int(self.my_id), agents=agents_message, known_points=known_points_json)
                     self.init_writer.write(init_message)
 
-                    print(f'Sent initialization message to agent {sample.agent_id}')
+                    # print(f'Sent initialization message to agent {sample.agent_id}')
             elif sample.action == 'initialized':
                 
                 # Only if the sample.timestamp is recent
@@ -139,12 +140,17 @@ class EntryExitListener(Listener):
                         'timestamp': sample.timestamp
                     }
 
+                    # Remove from exited agents if it exists
+                    if sample.agent_id in self.exited_agents:
+                        self.exited_agents.pop(sample.agent_id)
+
                     self.update_to_agents = True
             elif sample.action == 'exit':
                 # Agent Exited, remove from agents dictionary
                 if sample.agent_id in self.agents:
                     print(f'Agent {sample.agent_id} exited the environment')
-                    self.agents.pop(sample.agent_id)
+                    self.agents.pop(sample.agent_id)  # Pop from agents dictionary
+                    self.exited_agents[sample.agent_id] = int(time.time())  # Add to exited agents dictionary
                     self.update_to_agents = True
 
     def find_if_closest_robot(self, robot_hash):
@@ -169,7 +175,7 @@ class EntryExitListener(Listener):
                 print("I will not provide initialization.")  # I am not the closest robot
                 return False
 
-        print('I will provide initialization.')  # I am the closest robot
+        # print('I will provide initialization.')  # I am the closest robot
         return True
 
     def agent_update_available(self):
@@ -189,7 +195,9 @@ class EntryExitListener(Listener):
         - tuple: A tuple containing the active agents, exited agents, and lost agents.
         """
         self.update_to_agents = False
-        return self.agents
+        exited_agents = self.exited_agents.copy()
+        self.exited_agents.clear()
+        return self.agents, exited_agents
 
     def update_agents(self, agents=None, exited_agents=None, lost_agents=None):
         """
@@ -205,21 +213,6 @@ class EntryExitListener(Listener):
         """
         if agents is not None:
             self.agents = agents
-    
-    # def update_map(self, my_map, my_map_mod, map_md):
-    #     """
-    #     Updates the occupancy grid map and map metadata.
-
-    #     Parameters:
-    #     - map (OccupancyGrid): The updated occupancy grid map.
-    #     - map_md (MapMetaData): The updated map metadata.
-
-    #     Returns:
-    #     - None
-    #     """
-    #     self.map_msg = my_map
-    #     self.map_mod_msg = my_map_mod
-    #     self.map_md_msg = map_md
 
     def update_known_points(self, known_points):
         """
@@ -233,104 +226,6 @@ class EntryExitListener(Listener):
         """
         self.known_points = known_points
 
-class HeartbeatListener(Listener):
-    """
-    Listener class that handles heartbeat data from agents.
-
-    Attributes:
-        heartbeats (dict): A dictionary to store the heartbeats of agents.
-        locations (dict): A dictionary to store the locations of agents.
-        my_id (int): The ID of the current agent.
-        agents (dict): A dictionary to store information about all agents in the environment.
-    """
-
-    def __init__(self, my_id):
-        super().__init__()
-        self.heartbeats = dict()
-        self.new_heartbeats = dict()
-        self.locations = dict()
-        self.new_locations = dict()
-        self.my_id = my_id
-
-        self.R = None
-        self.t = None
-
-    def transform_point(self, point, forward=True):
-        if self.R is None:
-            return point
-
-        point_xy = np.array([point[0], point[1]])
-        if forward:
-            new_point_xy = self.R @ point_xy + self.t
-            new_point_theta = point[2] + np.arctan2(self.R[1, 0], self.R[0, 0])
-            return np.concatenate((new_point_xy, [new_point_theta]))
-        else:
-            new_point_xy = self.R.T @ (point_xy - self.t)
-            new_point_theta = point[2] - np.arctan2(self.R[1, 0], self.R[0, 0])
-            return np.concatenate((new_point_xy, [new_point_theta]))
-
-    def update_transformation(self, R, t):
-        self.R = R
-        self.t = t
-
-    def on_data_available(self, reader):
-        """
-        Callback method called when data is available in the reader.
-
-        Args:
-            reader (DataReader): The DataReader object.
-
-        Returns:
-            None
-        """
-        for sample in reader.read():
-
-            if sample.agent_id == int(self.my_id):
-                # Ignore messages from self
-                continue
-            
-            self.new_heartbeats[sample.agent_id] = sample.timestamp
-            self.heartbeats[sample.agent_id] = sample.timestamp
-
-            if sample.location_valid:
-
-                new_point = self.transform_point([sample.x, sample.y, sample.theta], forward=False)
-                x = new_point[0]
-                y = new_point[1]
-                theta = new_point[2]
-
-                self.locations[sample.agent_id] = (x, y, theta)
-                self.new_locations[sample.agent_id] = (x, y, theta)
-            else:
-                self.locations[sample.agent_id] = None
-                self.new_locations[sample.agent_id] = None
-                
-    def get_heartbeats(self):
-        """
-        Get a copy of the heartbeats dictionary.
-
-        Returns:
-            dict: A copy of the heartbeats dictionary.
-        """
-        returned_heartbeats = self.new_heartbeats.copy()
-        return returned_heartbeats
-    
-    def get_heartbeats_and_locations(self):
-        """
-        Get a copy of the heartbeats and locations dictionaries.
-
-        Returns:
-            tuple: A tuple containing copies of the heartbeats and locations dictionaries.
-        """
-        returned_heartbeats = self.new_heartbeats.copy()
-        self.new_heartbeats = dict()
-
-        returned_locations = self.new_locations.copy() 
-        self.new_locations = dict()
-
-        return returned_heartbeats, returned_locations
-
-    # TODO Should provide function to alert of new agents detected through heartbeats
 
 class InitializationListener(Listener):
     """
@@ -442,76 +337,6 @@ class InitializationListener(Listener):
         """
         return self.agents
 
-# FIXME Might not need this...
-class LocationListener(Listener):
-    """
-    Listener class that handles location data for agents.
-
-    Attributes:
-        my_id (int): The ID of the listener.
-        agent_ids (list): List of agent IDs.
-        location (tuple): Tuple to store agent location.
-
-    Methods:
-        on_data_available(reader): Callback method called when data is available.
-        get_location(): Returns the location tuple.
-    """
-
-    def __init__(self, my_id):
-        super().__init__()
-        self.my_id = my_id
-        self.location = None
-
-        self.R = None
-        self.t = None
-
-    def transform_point(self, point, forward=True):
-        if self.R is None:
-            return point
-
-        point_xy = np.array([point[0], point[1]])
-        if forward:
-            new_point_xy = self.R @ point_xy + self.t
-            new_point_theta = point[2] + np.arctan2(self.R[1, 0], self.R[0, 0])
-            return np.concatenate((new_point_xy, [new_point_theta]))
-        else:
-            new_point_xy = self.R.T @ (point_xy - self.t)
-            new_point_theta = point[2] - np.arctan2(self.R[1, 0], self.R[0, 0])
-            return np.concatenate((new_point_xy, [new_point_theta]))
-
-    def update_transformation(self, R, t):
-        self.R = R
-        self.t = t
-
-    def on_data_available(self, reader):
-        """
-        Callback method called when data is available.
-
-        Args:
-            reader: The data reader object.
-
-        Returns:
-            None
-        """
-        for sample in reader.read():
-
-            # Ignore messages from self
-            if sample.agent_id == int(self.my_id):
-                continue
-            
-            new_point = self.transform_point([sample.x, sample.y, sample.theta], forward=False)
-            self.location = (new_point[0], new_point[1], new_point[2])
-
-    def get_location(self):
-        """
-        Returns the locations dictionary.
-
-        Returns:
-            dict: Tuple containing agent location.
-        """
-        return self.location
-
-
 def hash_func(robot_id):
     """
     Hashes the given robot ID using SHA-256 algorithm.
@@ -528,12 +353,13 @@ def hash_func(robot_id):
 
 class EntryExitCommunication:
 
-    def __init__(self, server_url='http://192.168.50.2:8000/graphql'):
+    def __init__(self):
 
         rospy.init_node('agent_entry_exit', anonymous=True)
 
         # Get robot ID, Hash, and IP Address
         self.my_id = os.environ.get('ROBOT_ID')
+        print(f"\nMy Agent ID is {self.my_id}")
         self.my_hash = hash_func(self.my_id)
 
         # Get IP Address
@@ -566,54 +392,38 @@ class EntryExitCommunication:
 
         # Create the topics needed
         self.entry_exit_topic = Topic(self.participant, 'EntryExitTopic', EntryExit)
-        self.heartbeat_topic = Topic(self.participant, 'HeartbeatTopic', Heartbeat)
         self.init_topic = Topic(self.participant, 'InitializationTopic', Initialization)
-        self.location_topic = Topic(self.participant, 'LocationTopic'+ str(self.my_id), Location)
-        self.data_topic = Topic(self.participant, 'DataTopic' + str(self.my_id), DataMessage)
 
         # Create the DataWriters and DataReaders
         self.enter_exit_writer = DataWriter(self.publisher, self.entry_exit_topic, qos=reliable_qos)
-        # self.heartbeat_writer = DataWriter(self.publisher, self.heartbeat_topic, qos=best_effort_qos)
         self.init_writer = DataWriter(self.publisher, self.init_topic, qos=reliable_qos)
-        self.location_writer = DataWriter(self.publisher, self.location_topic, qos=best_effort_qos)
-        self.data_writer = DataWriter(self.publisher, self.data_topic, qos=reliable_qos)
 
         # ROS Publisher for publishing transformation matrix
         self.transform_pub = rospy.Publisher('transformation_matrix', Float64MultiArray, queue_size=10)
 
-        # ROS publisher for publishing external goals
-        self.goal_pub = rospy.Publisher('/external_goal', Pose2D, queue_size=10)
+        # FIXME
         self.agent_sub_pub = rospy.Publisher('/agent_to_subscribe', AgentSubscription, queue_size=10)
 
+        self.heartbeat_agents = list()
+        self.agent_pub = rospy.Publisher('/entry_agents', Int16MultiArray, queue_size=10)
+        self.exited_agent_pub = rospy.Publisher('/exited_agents', Int16MultiArray, queue_size=10)
+        self.agent_sub = rospy.Subscriber('/heartbeat_agents', Int16MultiArray, self.heartbeat_agents_callback)
+
         self.entry_exit_listener = EntryExitListener(self.participant, self.publisher, self.subscriber, self.my_id, self.my_ip, self.my_hash, self.init_writer)
-        self.heartbeat_listener = HeartbeatListener(self.my_id)
         self.init_listener = InitializationListener(self.my_id)
-        # self.my_data_listener = DataListener(self.my_id, self.my_id, self.goal_pub)
-        self.agent_data_listeners = dict()
 
         # We will start the readers later when it is necessary
         self.enter_exit_reader = None
         self.init_reader = None
-        self.heartbeat_reader = None
-        self.location_readers = dict()
-        self.location_listeners = dict()
-        # self.my_data_reader = DataReader(self.subscriber, self.data_topic, listener=self.my_data_listener, qos=reliable_qos)
-        self.agent_data_listeners = dict()
-        self.agent_data_readers = dict()
-
-        # Built-in reader to detect number of participants
-        self.built_in_reader = BuiltinDataReader(self.participant, BuiltinTopicDcpsParticipant)
-        self.num_participants = 0
-
-        # GraphQL server URL
-        self.graphql_server = server_url
 
         # TF Listener to get current robot position
         self.trans_listener = tf.TransformListener()
         self.my_location = None
 
-        # ROS publisher for publishing nearby agents locations
-        self.agent_locations_publisher = rospy.Publisher('agent_locations', AgentLocationsArray, queue_size=10)
+        self.last_time = int(time.time())
+
+    def heartbeat_agents_callback(self, data):
+        self.heartbeat_agents = data.data
 
     def setup_and_run(self):
         """
@@ -636,6 +446,8 @@ class EntryExitCommunication:
         Returns:
             None
         """
+        print("Starting Setup:")
+
         # Load the map from the current_map.json file and publish it
         self.load_map()
         
@@ -660,7 +472,7 @@ class EntryExitCommunication:
         # Wait for the reference points to become available
         num_tries = 0
         while not self.init_listener.known_points_available() and num_tries < 10:
-            print("Reference Points not yet received (attempt {0}/10)".format(num_tries+1))
+            print("    Reference Points not yet received (attempt {0}/10)".format(num_tries+1))
             time.sleep(1)
             if not self.init_listener.known_points_available():
                 entry_message.timestamp = int(time.time())
@@ -668,7 +480,7 @@ class EntryExitCommunication:
                 num_tries += 1
 
         if self.init_listener.known_points_available():
-            print("I am not the first agent, received reference points")
+            print("    I am not the first agent, received reference points")
 
             # Store the map, map metadata, and agents
             self.reference_known_points = self.init_listener.get_known_points()
@@ -685,7 +497,7 @@ class EntryExitCommunication:
             # Update the agents in the entry/exit listener
             self.entry_exit_listener.update_agents(agents=self.agents)
         else: 
-            print("I am the first agent, my map will be the reference map")
+            print("    I am the first agent, my map will be the reference map")
             self.reference_known_points = self.known_points
 
             self.agents[int(self.my_id)] = {
@@ -706,7 +518,6 @@ class EntryExitCommunication:
         # Start the heartbeat reader now that we have the reference points, stop listening for initialization messages
         self.init_reader = None
         self.init_listener = None
-        self.heartbeat_reader = DataReader(self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener, qos=best_effort_qos)
 
         # Send confirmation message to entry_exit topic
         entry_message = EntryExit(int(self.my_id), AGENT_TYPE, 'initialized', self.my_ip, int(time.time()))
@@ -773,7 +584,7 @@ class EntryExitCommunication:
         self.map_mod_publisher.publish(self.map_mod_msg)
         self.map_md_publisher.publish(self.map_md_msg)
 
-        print("Map loaded")
+        print("    Map loaded from current_map.json")
 
     def create_transform(self):
         """
@@ -782,35 +593,34 @@ class EntryExitCommunication:
         self.R = None
         self.t = None
         if self.known_points == self.reference_known_points:
-            return
+            self.R = np.identity(2)
+            self.t = np.zeros((2,1))
+        else:
+            # Find the transform from the known points
+            known_points = np.array(self.known_points)
+            reference_known_points = np.array(self.reference_known_points)
 
-        # Find the transform from the known points
-        known_points = np.array(self.known_points)
-        reference_known_points = np.array(self.reference_known_points)
+            centroid1 = np.mean(known_points, axis=0)
+            centroid2 = np.mean(reference_known_points, axis=0)
+            centered_points1 = known_points - centroid1
+            centered_points2 = reference_known_points - centroid2
 
-        centroid1 = np.mean(known_points, axis=0)
-        centroid2 = np.mean(reference_known_points, axis=0)
-        centered_points1 = known_points - centroid1
-        centered_points2 = reference_known_points - centroid2
-
-        H = np.dot(centered_points1.T, centered_points2)
-        U, S, Vt = np.linalg.svd(H)
-        R = Vt.T @ U.T
-
-        if np.linalg.det(R) < 0:
-            Vt[1, :] *= -1
+            H = np.dot(centered_points1.T, centered_points2)
+            U, S, Vt = np.linalg.svd(H)
             R = Vt.T @ U.T
 
-        t = centroid2 - R @ centroid1
+            if np.linalg.det(R) < 0:
+                Vt[1, :] *= -1
+                R = Vt.T @ U.T
 
-        self.R = R
-        self.t = t
+            t = centroid2 - R @ centroid1
 
-        self.heartbeat_listener.update_transformation(R, t)
+            self.R = R
+            self.t = t
 
         # Now publish the transformation matrix
         transform_msg = Float64MultiArray()
-        transform_msg.data = np.concatenate((R.flatten(), t))
+        transform_msg.data = np.concatenate((R.flatten(), self.t))
         self.transform_pub.publish(transform_msg)
 
     def transform_point(self, point, forward=True):
@@ -841,156 +651,84 @@ class EntryExitCommunication:
     def run(self):
         """
         Executes the main loop of the agent_entry_exit node.
-        This method continuously checks for new agents, updates the heartbeat of existing agents,
-        sends out heartbeat messages, checks for dead agents, and removes them from the agent list.
 
         Returns:
             None
         """
 
-        prev_nearby_agents = []
+        prev_agent_set = set()
+        exited_agents = dict()
 
         # Loop through at the rate we wish to publish location
-        rate = rospy.Rate(LOCATION_FREQUENCY)
-        last_time = int(time.time())
+        rate = rospy.Rate(5)
         while not rospy.is_shutdown():
             current_time = int(time.time())  # Get the current time
 
-            # Collect received locations of nearby agents and publish them to a ROS topic
-            agent_locations_array = AgentLocationsArray()
-            agent_locations_array.header.stamp = rospy.Time.now()
-            agent_locations_array.header.frame_id = 'map'
-            agent_list = []
-            agent_location_list = []
-            for agent_id in self.location_listeners.keys():
-                location = self.location_listeners[agent_id].get_location()
+            # Periodically perform some updates
+            if current_time - self.last_time >= HEARTBEAT_PERIOD:  # FIXME different period...
+                self.last_time = current_time
+                update_to_active_agents = False
 
-                if location is not None:
-
-                    id_msg = Int32()
-                    id_msg.data = int(agent_id)
-                    agent_list.append(id_msg)   
-                    agent_pose = Pose()
-                    agent_pose.position.x = location[0]
-                    agent_pose.position.y = location[1]
-                    agent_pose.position.z = 0
-                    quat = tf.transformations.quaternion_from_euler(0, 0, location[2])
-                    agent_pose.orientation.x = quat[0]
-                    agent_pose.orientation.y = quat[1]
-                    agent_pose.orientation.z = quat[2]
-                    agent_pose.orientation.w = quat[3]
-                    agent_location_list.append(agent_pose)
-            agent_locations_array.agentIDs = agent_list
-            agent_locations_array.locations = agent_location_list
-
-            if len(agent_list):
-                self.agent_locations_publisher.publish(agent_locations_array)
-
-            # Publish map/map metadata periodically
-            self.map_publisher.publish(self.map_msg)
-            self.map_mod_publisher.publish(self.map_mod_msg)
-            self.map_md_publisher.publish(self.map_md_msg)
-                
-            # Now publish heartbeat periodically
-            if current_time - last_time >= HEARTBEAT_PERIOD:
-                last_time = current_time
-                
+                # Publish map/map metadata periodically
+                self.map_publisher.publish(self.map_msg)
+                self.map_mod_publisher.publish(self.map_mod_msg)
+                self.map_md_publisher.publish(self.map_md_msg)
+                   
                 # Check for new agents
                 if self.entry_exit_listener.agent_update_available():
-                    self.agents = self.entry_exit_listener.get_agents()
+                    self.agents, newly_exited_agents = self.entry_exit_listener.get_agents()
+
+                    if len(newly_exited_agents):
+                        for agent_id in newly_exited_agents:
+                            exited_agents[agent_id] = newly_exited_agents[agent_id]
+
                 current_agents_list = list(self.agents.keys())
+                for agent_id in current_agents_list:
+                    if agent_id in exited_agents:
+                        exited_agents.pop(agent_id)  # Remove from exited agents dictionary if reentered
 
-                # Update agents with new heartbeats
-                heartbeats = self.heartbeat_listener.get_heartbeats()
+                # get heartbeat agents at this snapshot in time
+                heartbeat_agents = self.heartbeat_agents
 
-                update_to_active_agents = False
-                for agent_id in heartbeats.keys():
-                    if agent_id in current_agents_list:
-                        self.agents[agent_id]['timestamp'] = heartbeats[agent_id]
-                    else:
-                        print(f'Detected heartbeat from unknown agent {agent_id}')
-                        agent_hash = hash_func(str(agent_id))
-
-                        # FIXME: Add correct agent_type and ip_address
+                new_agents = set(heartbeat_agents) - set(current_agents_list)
+                for agent_id in new_agents:
+                    if agent_id not in exited_agents:
                         self.agents[agent_id] = {
-                            'agent_type': 'unknown',
-                            'ip_address': 'unknown',
-                            'hash': agent_hash,
-                            'timestamp': heartbeats[agent_id]
+                            'agent_type': "unknown",
+                            'ip_address': "unknown",
+                            'hash': hash_func(str(agent_id)),
+                            'timestamp': int(time.time())
                         }
                         update_to_active_agents = True
 
-                # # Check for nearby agents
-                # nearby_agents = set()
-                # for agent_id, location in locations.items():
-                #     if location is not None and agent_id in current_agents_list:
-                #         x, y, theta = location
-                #         self.agents[agent_id]['location'] = (x, y, theta)
-
-                #         # Determine if the agent is close to the robot
-                #         if self.my_location is not None:
-                #             distance = ((x - self.my_location[0])**2 + (y - self.my_location[1])**2)**0.5
-                #             if distance < DISTANCE_THRESHOLD:
-                #                 nearby_agents.add(agent_id)
-                #                 if 'agent_id' not in list(self.location_readers.keys()):
-                #                     new_location_topic = Topic(self.participant, 'LocationTopic' + str(agent_id), Location)
-                #                     self.location_listeners[agent_id] = LocationListener(self.my_id)
-                #                     self.location_listeners[agent_id].update_transformation(self.R, self.t)
-                #                     self.location_readers[agent_id] = DataReader(self.subscriber, new_location_topic, listener=self.location_listeners[agent_id], qos=best_effort_qos)
-                
-                #                     # new_data_topic = Topic(self.participant, 'DataTopic' + str(agent_id), DataMessage)
-                #                     # self.agent_data_listeners[agent_id] = DataListener(self.my_id, agent_id)
-                #                     # self.agent_data_readers[agent_id] = DataReader(self.subscriber, new_data_topic, listener=self.agent_data_listeners[agent_id], qos=reliable_qos)
-
-                # # Only need to perform this housekeeping if the list of nearby agents has changed
-                # if nearby_agents != prev_nearby_agents:
-                #     prev_nearby_agents = nearby_agents
-                   
-                #     # Remove readers that are no longer needed
-                #     agent_list = list(self.location_readers.keys())
-                #     for agent_id in agent_list:
-                #         if agent_id not in nearby_agents:
-                #             self.location_listeners[agent_id] = None
-                #             self.location_readers[agent_id] = None
-                #             self.location_listeners.pop(agent_id)
-                #             self.location_readers.pop(agent_id)
-
-                #             # self.agent_data_listeners[agent_id] = None
-                #             # self.agent_data_readers[agent_id] = None
-                #             # self.agent_data_listeners.pop(agent_id)
-                #             # self.agent_data_readers.pop(agent_id)
-
-                # Check Periodically for Dead Agents
-                dead_agents = []
-                for agent_id, agent_info in self.agents.items():
-
-                    # Skip self
-                    if agent_id == int(self.my_id):
-                        continue
-
-                    time_difference = current_time - agent_info['timestamp']
-
-                    if time_difference > HEARTBEAT_TIMEOUT:
-                        # Agent has timed out
-                        print(f'Agent {agent_id} has timed out')
-                        dead_agents.append(agent_id)              
-                
-                # Remove Dead Agents
+                # Check for dead agents that haven't exited gracefully
+                dead_agents = prev_agent_set - set(heartbeat_agents)
+                prev_agent_set = set(heartbeat_agents)
                 for agent_id in dead_agents:
-                    self.agents.pop(agent_id)
+                    if agent_id in self.agents:
+                        self.agents.pop(agent_id)
+                        update_to_active_agents = True
 
                 # Update the entry/exit listener with the new agents
-                if update_to_active_agents or dead_agents:
+                if update_to_active_agents:
                     self.entry_exit_listener.update_agents(agents=self.agents)
-
-                if len(self.agents) > 0:
-                    agent_sub_list = AgentSubscription()
-                    agent_sub_list.agentIDs.data = list(self.agents.keys())
-                    agent_sub_list.header.stamp = rospy.Time.now()
-                    agent_sub_list.header.frame_id = 'map'
-                    self.agent_sub_pub.publish(agent_sub_list)
+            
+                self.update_agents(exited_agents=exited_agents)
 
             rate.sleep()
+
+    def update_agents(self, exited_agents=None):
+
+        # Publish the agents
+        agent_list = list(self.agents.keys())
+        entry_agents = Int16MultiArray(data=agent_list)
+        self.agent_pub.publish(entry_agents)
+
+        # Publish the exited agents
+        if exited_agents is not None:
+            exited_agent_list = list(exited_agents.keys())
+            exited_agents = Int16MultiArray(data=exited_agent_list)
+            self.exited_agent_pub.publish(exited_agents)
 
     def shutdown(self):
         print('\nSending exit message...')

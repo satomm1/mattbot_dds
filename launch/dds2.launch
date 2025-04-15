@@ -1,4 +1,5 @@
 <launch>
     <node name="agent_entry_exit" pkg="mattbot_dds" type="entry_exit2.py" output="screen"/>
-    <node name="agent_heartbeat" pkg="mattbot_dds" type="heartbeat2.py" output="screen"/>
+    <node name="heartbeat_publisher" pkg="mattbot_dds" type="heartbeat_publisher.py" output="screen"/>
+    <node name="heartbeat_subscriber" pkg="mattbot_dds" type="heartbeat_subscriber.py" output="screen"/>
 </launch>

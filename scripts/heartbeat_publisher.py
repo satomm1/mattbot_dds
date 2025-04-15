@@ -12,7 +12,6 @@ from cyclonedds.idl.types import sequence
 from cyclonedds.core import Qos, Policy, Listener
 from cyclonedds.builtin import BuiltinDataReader, BuiltinTopicDcpsParticipant
 
-from dataclasses import dataclass
 import time
 import os
 import numpy as np
@@ -26,7 +25,7 @@ AGENT_TYPE = "robot"
 
 class HeartbeatPublisher:
     def __init__(self):
-        rospy.init_node('dds_heartbeat', anonymous=True)
+        rospy.init_node('dds_heartbeat_publisher', anonymous=True)
 
         # Get robot ID, Hash, and IP Address
         self.my_id = os.environ.get('ROBOT_ID')
@@ -37,7 +36,6 @@ class HeartbeatPublisher:
         s.connect(("8.8.8.8", 80))
         self.my_ip = s.getsockname()[0]
         s.close()
-        print(f"My IP address is {self.my_ip}")
 
         self.lease_duration_ms = 30000
         qos_profile = DomainParticipantQos()
@@ -117,6 +115,6 @@ class HeartbeatPublisher:
 
 if __name__ == '__main__':
     heartbeat_publisher = HeartbeatPublisher()
-    time.sleep(HEARTBEAT_PERIOD)
+    time.sleep(10)
     rospy.on_shutdown(heartbeat_publisher.shutdown)
     heartbeat_publisher.run()
