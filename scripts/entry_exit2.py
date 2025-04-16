@@ -715,7 +715,10 @@ class EntryExitCommunication:
             
                 self.update_agents(exited_agents=exited_agents)
 
-            self.agent_sub_pub.publish(Int16MultiArray(data=list(self.agents.keys())))
+            agent_list_minus_self = list(self.agents.keys())
+            if int(self.my_id) in agent_list_minus_self:
+                agent_list_minus_self.remove(int(self.my_id))
+            self.agent_sub_pub.publish(Int16MultiArray(data=agent_list_minus_self))
 
             rate.sleep()
 
