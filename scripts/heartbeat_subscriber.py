@@ -110,7 +110,7 @@ class HeartbeatSubscriber:
         self.prev_exited_agents = set()
 
         # ROS Publisher for publishing active agents and exited agents
-        self.active_agents_pub = rospy.Publisher('/hearbeat_agents', Int16MultiArray, queue_size=10)
+        self.active_agents_pub = rospy.Publisher('/heartbeat_agents', Int16MultiArray, queue_size=10)
         self.active_agents_sub = rospy.Subscriber('/entry_agents', Int16MultiArray, self.active_agents_callback)
         self.exited_agents_sub = rospy.Subscriber('/exited_agents', Int16MultiArray, self.exited_agents_callback)
 
@@ -138,7 +138,7 @@ class HeartbeatSubscriber:
         # Update the agents dictionary with the new active agents
         for agent_id in active_agents:
             if agent_id not in self.agents:
-                self.agents[agent_id] = int(time.time())
+                self.agents[agent_id] = {'timestamp': int(time.time())}
 
             if agent_id in self.exited_agents:
                 self.exited_agents.remove(agent_id)

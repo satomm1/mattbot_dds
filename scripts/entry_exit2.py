@@ -266,7 +266,7 @@ class InitializationListener(Listener):
             if sending_agent == int(self.my_id):
                 continue
 
-            print(f'Initialization message received from agent {sending_agent}')
+            print(f'    Initialization message received from agent {sending_agent}')
 
             # Ignore messages not intended for this agent
             if sample.target_agent != int(self.my_id):
@@ -290,7 +290,7 @@ class InitializationListener(Listener):
             self.reference_known_points = known_points
             self.known_points_received = True
 
-            print("Reference points received through initialization message")
+            print("    Reference points received through initialization message")
 
     def map_available(self):
         """
@@ -402,7 +402,7 @@ class EntryExitCommunication:
         self.transform_pub = rospy.Publisher('transformation_matrix', Float64MultiArray, queue_size=10)
 
         # FIXME
-        self.agent_sub_pub = rospy.Publisher('/agent_to_subscribe', AgentSubscription, queue_size=10)
+        self.agent_sub_pub = rospy.Publisher('/agents_to_subscribe', Int16MultiArray, queue_size=10)
 
         self.heartbeat_agents = list()
         self.agent_pub = rospy.Publisher('/entry_agents', Int16MultiArray, queue_size=10)
@@ -620,7 +620,7 @@ class EntryExitCommunication:
 
         # Now publish the transformation matrix
         transform_msg = Float64MultiArray()
-        transform_msg.data = np.concatenate((R.flatten(), self.t))
+        transform_msg.data = np.concatenate((self.R.flatten(), self.t.flatten()))
         self.transform_pub.publish(transform_msg)
 
     def transform_point(self, point, forward=True):
@@ -714,6 +714,8 @@ class EntryExitCommunication:
                     self.entry_exit_listener.update_agents(agents=self.agents)
             
                 self.update_agents(exited_agents=exited_agents)
+
+            self.agent_sub_pub.publish(Int16MultiArray(data=list(self.agents.keys())))
 
             rate.sleep()
 

@@ -115,6 +115,6 @@ class HeartbeatPublisher:
 
 if __name__ == '__main__':
     heartbeat_publisher = HeartbeatPublisher()
-    time.sleep(10)
+    time.sleep(11)
     rospy.on_shutdown(heartbeat_publisher.shutdown)
     heartbeat_publisher.run()
