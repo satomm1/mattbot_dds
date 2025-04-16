@@ -17,25 +17,9 @@ import time
 import os
 import numpy as np
 
+from dds_utils import Location
+
 LOCATION_PERIOD = 0.75    # seconds
-
-@dataclass
-class Location(IdlStruct):
-    """
-    Represents the location of an agent.
-
-    Attributes:
-        agent_id (int): The ID of the agent.
-        timestamp (int): The timestamp of the location message.
-        x (float): The x-coordinate of the agent.
-        y (float): The y-coordinate of the agent.
-        theta (float): The orientation of the agent.
-    """
-    agent_id: int
-    timestamp: int
-    x: float
-    y: float
-    theta: float
 
 class LocationPublisher:
     def __init__(self):

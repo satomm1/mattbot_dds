@@ -3,6 +3,8 @@ from rospy_message_converter import message_converter
 import tf
 import rospkg
 from mattbot_image_detection.msg import DetectedObject, DetectedObjectArray
+from image_detection_with_unknowns import LabeledObject, LabeledObjectArray
+from sensor_msgs.msg import Image
 from mattbot_dds.msg import AgentSubscription, AgentPath, AgentLocation
 from nav_msgs.msg import Path
 from geometry_msgs.msg import Pose, Pose2D
@@ -336,6 +338,8 @@ class CommManager:
         self.path_subscriber = rospy.Subscriber('/cmd_smoothed_path', Path, self.path_callback, queue_size=10)
         self.voice_goal_subscriber = rospy.Subscriber('/voice_goal', Pose2D, self.voice_goal_callback, queue_size=10)
 
+        # self.labeled_image_subscriber = rospy.Subscriber("/labeled_unknown_objects", LabeledObjectArray, self.image_callback, queue_size=3)
+
     def transformation_callback(self, data):
         # Get the transformation matrix
         transformation_matrix = data.data
@@ -428,6 +432,19 @@ class CommManager:
         )
         self.data_writer.write(goal_message)
         time.sleep(0.01)
+
+    def image_callback(self, msg):
+        if len(msg.objects) == 0:
+            # No objects detected, do nothing
+            return
+
+        img_message_str = message_converter.convert_ros_message_to_dictionary(img_message)
+        message = DataMessage(message_type='unknown_image', sending_agent=self.agent_id, timestamp=rospy.Time.now().to_nsec(), data='')
+        message.data = json.dumps(img_message_str) 
+
+        self.data_writer.write(message)
+        time.sleep(0.01) 
+        
 
     def agent_subscription_callback(self, msg):
         agents = msg.agentIDs.data

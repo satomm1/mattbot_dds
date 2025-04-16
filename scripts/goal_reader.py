@@ -6,7 +6,7 @@ from mattbot_image_detection.msg import DetectedObject
 from mattbot_dds.msg import AgentSubscription, AgentPath, AgentLocation
 from nav_msgs.msg import Path
 from geometry_msgs.msg import Pose, Pose2D
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64MultiArray, UInt32
 
 from cyclonedds.domain import DomainParticipant
 from cyclonedds.topic import Topic
@@ -67,9 +67,12 @@ class SelfDataListener(Listener):
         self.my_id = my_id
         self.topic_id = topic_id
         self.goal_pub = rospy.Publisher('/external_goal', Pose2D, queue_size=10)
+        self.send_unknown_images_pub = rospy.Publisher('/send_unknown_images', UInt32, queue_size=10)
 
         self.R = None
         self.t = None
+
+        print("Created listener for topic", topic_id)
 
     def on_data_available(self, reader):
         for sample in reader.read():
@@ -83,6 +86,8 @@ class SelfDataListener(Listener):
             timestamp = sample.timestamp
             data = json.loads(sample.data)
 
+            print("Received message from agent", sending_agent, "of type", message_type)
+
             # Process the message
             if message_type == "goal":
 
@@ -95,6 +100,13 @@ class SelfDataListener(Listener):
                 goal_msg.y = y
                 goal_msg.theta = theta
                 self.goal_pub.publish(goal_msg)
+            elif message_type == "send_unknown_images":
+                # Publish to topic to let the image detection node know to send unknown images
+                # We need to send the agent id to which the images should be sent
+                msg = UInt32()
+                msg.data = sending_agent
+                self.send_unknown_images_pub.publish(msg)
+                
 
     def update_transformation_matrix(self, R, t):   
         
@@ -167,7 +179,7 @@ class GoalReader:
 
     def run(self):
         while not rospy.is_shutdown():
-            time.sleep(1)
+            rospy.spin()
 
     def shutdown(self):
         print("Shutting down DDS Goal Reader")

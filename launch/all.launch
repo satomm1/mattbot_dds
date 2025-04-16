@@ -1,0 +1,5 @@
+<launch>
+    <include file="$(find mattbot_dds)/launch/comm_manager.launch" />
+    <include file="$(find mattbot_dds)/launch/entry_exit.launch" />
+    <include file="$(find mattbot_dds)/launch/heartbeat.launch" />
+</launch>
