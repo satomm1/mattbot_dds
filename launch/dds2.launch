@@ -4,4 +4,6 @@
     <node name="heartbeat_subscriber" pkg="mattbot_dds" type="heartbeat_subscriber.py" output="screen"/>
     <node name="location_subscriber" pkg="mattbot_dds" type="location_subscriber.py" output="screen"/>
     <!-- <node name="location_publisher" pkg="mattbot_dds" type="location_publisher.py" output="screen"/> -->
+    <node name="data_publisher" pkg="mattbot_dds" type="data_publisher.py" output="screen"/>
+    <!-- <node name="data_subscriber" pkg="mattbot_dds" type="data_subscriber.py" output="screen"/> -->
 </launch>
