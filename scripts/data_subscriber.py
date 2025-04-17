@@ -32,59 +32,6 @@ from dds_utils import DataMessage, reliable_qos
 # and process them.
 ##################################################
 
-class SelfDataListener(Listener):
-
-    def __init__(self, my_id, topic_id):
-        super().__init__()
-        self.my_id = my_id
-        self.topic_id = topic_id
-        self.goal_pub = rospy.Publisher('/external_goal', Pose2D, queue_size=10)
-
-        self.R = None
-        self.t = None
-
-    def transform_point(self, point, forward=True):
-        if self.R is None:
-            return point
-
-        point_xy = np.array([point[0], point[1]])
-        if forward:
-            new_point_xy = self.R @ point_xy + self.t
-            new_point_theta = point[2] + np.arctan2(self.R[1, 0], self.R[0, 0])
-            return np.concatenate((new_point_xy, [new_point_theta]))
-        else:
-            new_point_xy = self.R.T @ (point_xy - self.t)
-            new_point_theta = point[2] - np.arctan2(self.R[1, 0], self.R[0, 0])
-            return np.concatenate((new_point_xy, [new_point_theta]))
-
-    def update_transformation(self, R, t):
-        self.R = R
-        self.t = t
-
-    def on_data_available(self, reader):
-        for sample in reader.read():
-            
-            sending_agent = sample.sending_agent
-            if sending_agent == int(self.my_id):
-                # Ignore messages from me
-                continue
-
-            message_type = sample.message_type
-            timestamp = sample.timestamp
-            data = json.loads(sample.data)
-
-            if self.topic_id == self.my_id:  # This is my topic, just a check
-                # Process the message
-                if message_type == "goal":
-                    new_points = self.transform_point([data['x'], data['y'], data['theta']], forward=False)
-                    x, y, theta = new_points
-                    print(f"Received goal message from agent {sending_agent}: x={x}, y={y}, theta={theta}")
-                    goal_msg = Pose2D()
-                    goal_msg.x = x
-                    goal_msg.y = y
-                    goal_msg.theta = theta
-                    self.goal_pub.publish(goal_msg)
-
 class DataListener(Listener):
 
     def __init__(self, my_id, topic_id, object_publisher, object_sensor_publisher, path_publisher):
