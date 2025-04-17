@@ -22,10 +22,7 @@ from cyclonedds.builtin import BuiltinDataReader, BuiltinTopicDcpsParticipant
 
 import time
 import os
-import hashlib
-import socket
 import json
-import requests
 import numpy as np
 
 from dds_utils import DataMessage, reliable_qos
@@ -273,14 +270,14 @@ class DataSubscriber:
                 old_agents = self.subscribed_agents - self.agents_to_subscribe
 
                 for agent_id in new_agents:
-                    print(f"Subscribed to agent {agent_id} data")
+                    print(f"    Subscribed to agent {agent_id} data")
                     new_data_topic = Topic(self.participant, 'DataTopic' + str(agent_id), DataMessage)
                     self.data_listeners[agent_id] = DataListener(self.my_id, agent_id, self.object_publisher, self.object_sensor_publisher, self.path_publisher)
                     self.data_listeners[agent_id].update_transformation(self.R, self.t)
                     self.data_readers[agent_id] = DataReader(self.subscriber, new_data_topic, listener=self.data_listeners[agent_id], qos=reliable_qos)
 
                 for agent_id in old_agents:
-                    print(f"Unsubscribed from agent {agent_id} data")
+                    print(f"    Unsubscribed from agent {agent_id} data")
                     self.data_readers[agent_id] = None
                     self.data_listeners[agent_id] = None
                     self.data_readers.pop(agent_id)

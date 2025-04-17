@@ -170,14 +170,14 @@ class LocationSubscriber:
                 old_agents = self.subscribed_agents - self.agents_to_subscribe
 
                 for agent_id in new_agents:
-                    print(f"Subscribed to agent {agent_id} location")
+                    print(f"    Subscribed to agent {agent_id} location")
                     new_location_topic = Topic(self.participant, 'LocationTopic' + str(agent_id), Location)
                     self.location_listeners[agent_id] = LocationListener(self.my_id)
                     self.location_listeners[agent_id].update_transformation(self.R, self.t)
                     self.location_readers[agent_id] = DataReader(self.subscriber, new_location_topic, listener=self.location_listeners[agent_id], qos=best_effort_qos)
 
                 for agent_id in old_agents:
-                    print(f"Unsubscribed from agent {agent_id} location")
+                    print(f"    Unsubscribed from agent {agent_id} location")
                     self.location_readers[agent_id] = None
                     self.location_listeners[agent_id] = None
                     self.location_readers.pop(agent_id)
