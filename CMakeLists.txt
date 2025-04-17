@@ -178,6 +178,7 @@ catkin_install_python(PROGRAMS
   scripts/location_subscriber.py
   scripts/location_publisher.py
   scripts/data_publisher.py
+  scripts/data_subscriber.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
