@@ -3,8 +3,6 @@ from rospy_message_converter import message_converter
 import tf
 import rospkg
 from mattbot_image_detection.msg import DetectedObject
-from mattbot_dds.msg import AgentSubscription, AgentPath, AgentLocation
-from nav_msgs.msg import Path
 from geometry_msgs.msg import Pose, Pose2D
 from std_msgs.msg import Float64MultiArray, UInt32
 
@@ -76,8 +74,7 @@ class SelfDataListener(Listener):
                 msg = UInt32()
                 msg.data = sending_agent
                 self.send_unknown_images_pub.publish(msg)
-                
-
+    
     def update_transformation_matrix(self, R, t):   
         
         self.R = R

@@ -1,5 +1,6 @@
 import rospy
 from std_msgs.msg import Float64MultiArray, Int16MultiArray
+from mattbot_dds.msg import AgentLocation
 import tf
 
 from cyclonedds.domain import DomainParticipant, DomainParticipantQos
@@ -33,10 +34,13 @@ class LocationListener(Listener):
         set_agent_ids(agent_ids): Sets the agent IDs and updates the locations dictionary.
     """
 
-    def __init__(self, my_id):
+    def __init__(self, my_id, agent_id):
         super().__init__()
         self.my_id = my_id
+        self.agent_id = agent_id
         self.locations = (None, None, None)
+
+        self.agent_location_publisher = rospy.Publisher('/agent_location', AgentLocation, queue_size=10)
 
         self.R = None
         self.t = None
@@ -78,31 +82,27 @@ class LocationListener(Listener):
             if sample.x is not None and sample.y is not None and sample.theta is not None:
                 x, y, theta = self.transform_point((sample.x, sample.y, sample.theta), forward=False)
                 self.locations = (x, y, theta)
-                ignite_data = {"x": x, "y": y, "theta": theta, "timestamp": sample.timestamp}
-                ignite_data = json.dumps(ignite_data).encode('utf-8')
 
-                # Update the robot position in Ignite
-                agent_id = int(sample.agent_id)
-                response =  requests.post(
-                                self.graphql_server,
-                                json={
-                                    'query': ROBOT_POSITION_MUTATION,
-                                    'variables': {
-                                        'robot_id': agent_id,
-                                        'x': x,
-                                        'y': y,
-                                        'theta': theta
-                                    }
-                                },
-                                timeout=1
-                            )
+                agent_location = AgentLocation()
+                agent_location.agentID = int(sample.agent_id)
+                agent_location.pose.position.x = x
+                agent_location.pose.position.y = y
+                agent_location.pose.position.z = 0.0
+
+                quaternion = tf.transformations.quaternion_from_euler(0, 0, theta)
+                agent_location.pose.orientation.x = quaternion[0]
+                agent_location.pose.orientation.y = quaternion[1]
+                agent_location.pose.orientation.z = quaternion[2]
+                agent_location.pose.orientation.w = quaternion[3]
+
+                self.agent_location_publisher.publish(agent_location)
 
     def get_locations(self):
         """
-        Returns the locations dictionary.
+        Returns the location.
 
         Returns:
-            dict: Dictionary containing agent locations.
+            tuple: The location of the agent.
         """
         return self.locations
 
@@ -172,7 +172,7 @@ class LocationSubscriber:
                 for agent_id in new_agents:
                     print(f"    Subscribed to agent {agent_id} location")
                     new_location_topic = Topic(self.participant, 'LocationTopic' + str(agent_id), Location)
-                    self.location_listeners[agent_id] = LocationListener(self.my_id)
+                    self.location_listeners[agent_id] = LocationListener(self.my_id, agent_id)
                     self.location_listeners[agent_id].update_transformation(self.R, self.t)
                     self.location_readers[agent_id] = DataReader(self.subscriber, new_location_topic, listener=self.location_listeners[agent_id], qos=best_effort_qos)
 
