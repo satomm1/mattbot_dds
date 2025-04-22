@@ -5,7 +5,7 @@ import rospkg
 from mattbot_image_detection.msg import DetectedObject, DetectedObjectArray
 # from image_detection_with_unknowns import LabeledObject, LabeledObjectArray
 from sensor_msgs.msg import Image
-from mattbot_dds.msg import AgentSubscription, AgentPath, AgentLocation
+from mattbot_dds.msg import AgentSubscription, AgentPath, AgentLocation, MapUpdate
 from nav_msgs.msg import Path
 from geometry_msgs.msg import Pose, Pose2D
 from std_msgs.msg import Float64MultiArray, Int16MultiArray
@@ -34,13 +34,14 @@ from dds_utils import DataMessage, reliable_qos
 
 class DataListener(Listener):
 
-    def __init__(self, my_id, topic_id, object_publisher, object_sensor_publisher, path_publisher):
+    def __init__(self, my_id, topic_id, object_publisher, object_sensor_publisher, path_publisher, map_update_publisher):
         super().__init__()
         self.my_id = my_id
         self.topic_id = topic_id
         self.object_publisher = object_publisher
         self.object_sensor_publisher = object_sensor_publisher
         self.path_publisher = path_publisher
+        self.map_update_publisher = map_update_publisher
 
         self.R = None
         self.t = None
@@ -131,6 +132,20 @@ class DataListener(Listener):
                     new_agent_path.path = new_path
                     self.path_publisher.publish(new_agent_path)
                     print("Received path from agent " + str(self.topic_id))
+                
+                elif message_type == "map_update":
+                    map_update = message_converter.convert_dictionary_to_ros_message('mattbot_dds/MapUpdate', data)
+
+                    # Need to transform the map update to my frame
+                    x = map_update.x
+                    y = map_update.y
+                    new_point = self.transform_point([x, y, 0], forward=False)
+
+                    map_update.x = new_point[0]
+                    map_update.y = new_point[1]
+        
+                    # Publish the map update
+                    self.map_update_publisher.publish(map_update)
             else:
                 # This was a message to the agent, we can safely ignore
                 continue
@@ -160,6 +175,7 @@ class DataSubscriber:
         self.object_publisher = rospy.Publisher('/object_from_agent', DetectedObject, queue_size=10)
         self.object_sensor_publisher = rospy.Publisher('/object_from_sensor', DetectedObjectArray, queue_size=10)
         self.path_publisher = rospy.Publisher('/path_from_agent', AgentPath, queue_size=10)
+        self.map_update_publisher = rospy.Publisher('/map_update', MapUpdate, queue_size=10)
 
         self.subscribed_agents = set()
         self.agents_to_subscribe = set()
@@ -219,7 +235,7 @@ class DataSubscriber:
                 for agent_id in new_agents:
                     print(f"    Subscribed to agent {agent_id} data")
                     new_data_topic = Topic(self.participant, 'DataTopic' + str(agent_id), DataMessage)
-                    self.data_listeners[agent_id] = DataListener(self.my_id, agent_id, self.object_publisher, self.object_sensor_publisher, self.path_publisher)
+                    self.data_listeners[agent_id] = DataListener(self.my_id, agent_id, self.object_publisher, self.object_sensor_publisher, self.path_publisher, self.map_update_publisher)
                     self.data_listeners[agent_id].update_transformation(self.R, self.t)
                     self.data_readers[agent_id] = DataReader(self.subscriber, new_data_topic, listener=self.data_listeners[agent_id], qos=reliable_qos)
 
