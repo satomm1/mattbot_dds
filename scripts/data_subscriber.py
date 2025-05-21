@@ -9,6 +9,7 @@ from mattbot_dds.msg import AgentSubscription, AgentPath, AgentLocation, MapUpda
 from nav_msgs.msg import Path
 from geometry_msgs.msg import Pose, Pose2D
 from std_msgs.msg import Float64MultiArray, Int16MultiArray
+from mattbot_image_detection.msg import FaceEncoding
 
 from cyclonedds.domain import DomainParticipant, DomainParticipantQos
 from cyclonedds.topic import Topic
@@ -146,6 +147,18 @@ class DataListener(Listener):
         
                     # Publish the map update
                     self.map_update_publisher.publish(map_update)
+                
+                elif message_type == "face_encoding"
+                    data = json.loads(sample.data)
+                    encoding = data['encoding']
+                    name = data['name']
+
+                    face_encoding = FaceEncoding()
+                    face_encoding.encoding = list(encoding)
+                    face_encoding.name = name
+                    face_encoding.external = True  # This face encoding came from an external agent
+
+                    self.face_encoding_publisher.publish(face_encoding)
             else:
                 # This was a message to the agent, we can safely ignore
                 continue

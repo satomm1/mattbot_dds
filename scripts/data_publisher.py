@@ -152,6 +152,10 @@ class DataPublisher:
 
     def face_encoding_callback(self, msg):
         # Convert the Float64MultiArray to a list
+        external = msg.external
+        if external:
+            return  # Ignore external face encodings
+
         face_encoding = list(msg.encoding)
         name = msg.name
 
