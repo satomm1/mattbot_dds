@@ -32,6 +32,11 @@ To accomplish this transform, we use a simple linear transformation between fram
 **location_subscriber.py**: Subscribes to the location of other agents
 
 ## Launch Files
+- **dds.launch**: Launches all the relevant DDS files for full operations
+
+```
+roslaunch mattbot_dds dds.launch
+```
 
 **Author**: Matthew Sato, Stanford Engineering Informatics Group
 
