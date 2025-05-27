@@ -168,11 +168,6 @@ include_directories(
 ## Mark executable scripts (Python etc.) for installation
 ## in contrast to setup.py, you can choose the destination
 catkin_install_python(PROGRAMS
-  scripts/agent_entry_exit.py
-  scripts/communication_manager.py
-  scripts/heartbeat.py
-  scripts/location.py
-  scripts/goal_reader.py
   scripts/entry_exit2.py
   scripts/heartbeat_subscriber.py
   scripts/heartbeat_publisher.py
