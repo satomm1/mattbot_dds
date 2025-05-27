@@ -192,7 +192,7 @@ class DataSubscriber:
         self.object_sensor_publisher = rospy.Publisher('/object_from_sensor', DetectedObjectArray, queue_size=10)
         self.path_publisher = rospy.Publisher('/path_from_agent', AgentPath, queue_size=10)
         self.map_update_publisher = rospy.Publisher('/map_update', MapUpdate, queue_size=10)
-        self.face_encoding_publisher = rospy.Publisher('/face_encoding', FaceEncoding, queue_size=10)
+        self.face_encoding_publisher = rospy.Publisher('/new_face_encoding', FaceEncoding, queue_size=10)
 
         self.subscribed_agents = set()
         self.agents_to_subscribe = set()
