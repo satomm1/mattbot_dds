@@ -9,6 +9,7 @@ from mattbot_dds.msg import AgentSubscription, AgentPath, AgentLocation
 from nav_msgs.msg import Path
 from geometry_msgs.msg import Pose, Pose2D
 from std_msgs.msg import Float64MultiArray, Int16MultiArray
+from mattbot_image_detection.msg import FaceEncoding
 
 from cyclonedds.domain import DomainParticipant, DomainParticipantQos
 from cyclonedds.topic import Topic
@@ -56,6 +57,7 @@ class DataPublisher:
         self.object_subscriber = rospy.Subscriber('/confirmed_objects', DetectedObject, self.confirmed_object_callback, queue_size=10)
         self.path_subscriber = rospy.Subscriber('/cmd_smoothed_path', Path, self.path_callback, queue_size=10)
         self.voice_goal_subscriber = rospy.Subscriber('/voice_goal', Pose2D, self.voice_goal_callback, queue_size=10)
+        self.new_face_encoding_subscriber = rospy.Subscriber('/new_face_encoding', FaceEncoding, self.face_encoding_callback, queue_size=10)
 
     def transformation_callback(self, data):
         # Get the transformation matrix
@@ -146,6 +148,27 @@ class DataPublisher:
             data=json.dumps(message_converter.convert_ros_message_to_dictionary(msg))
         )
         self.data_writer.write(goal_message)
+        time.sleep(0.01)
+
+    def face_encoding_callback(self, msg):
+        # Convert the Float64MultiArray to a list
+        external = msg.external
+        if external:
+            return  # Ignore external face encodings
+
+        face_encoding = list(msg.encoding)
+        name = msg.name
+
+        face_encoding_message = DataMessage(
+            message_type="face_encoding",
+            sending_agent=int(self.my_id),
+            timestamp=int(time.time()),
+            data=json.dumps({
+                "name": name,
+                "encoding": face_encoding
+            })
+        )
+        self.data_writer.write(face_encoding_message)
         time.sleep(0.01)
 
     def run(self):

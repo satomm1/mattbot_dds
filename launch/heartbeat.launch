@@ -1,5 +1,0 @@
-<launch>
-    <node name="heartbeat_publisher" pkg="mattbot_dds" type="heartbeat.py" output="screen"/>
-    <node name="location_publisher" pkg="mattbot_dds" type="location.py" output="screen"/>
-    <node name="goal_reader" pkg="mattbot_dds" type="goal_reader.py" output="screen"/>
-</launch>

@@ -9,6 +9,7 @@ from mattbot_dds.msg import AgentSubscription, AgentPath, AgentLocation, MapUpda
 from nav_msgs.msg import Path
 from geometry_msgs.msg import Pose, Pose2D
 from std_msgs.msg import Float64MultiArray, Int16MultiArray
+from mattbot_image_detection.msg import FaceEncoding
 
 from cyclonedds.domain import DomainParticipant, DomainParticipantQos
 from cyclonedds.topic import Topic
@@ -34,7 +35,7 @@ from dds_utils import DataMessage, reliable_qos
 
 class DataListener(Listener):
 
-    def __init__(self, my_id, topic_id, object_publisher, object_sensor_publisher, path_publisher, map_update_publisher):
+    def __init__(self, my_id, topic_id, object_publisher, object_sensor_publisher, path_publisher, map_update_publisher, face_encoding_publisher):
         super().__init__()
         self.my_id = my_id
         self.topic_id = topic_id
@@ -42,6 +43,7 @@ class DataListener(Listener):
         self.object_sensor_publisher = object_sensor_publisher
         self.path_publisher = path_publisher
         self.map_update_publisher = map_update_publisher
+        self.face_encoding_publisher = face_encoding_publisher
 
         self.R = None
         self.t = None
@@ -146,6 +148,20 @@ class DataListener(Listener):
         
                     # Publish the map update
                     self.map_update_publisher.publish(map_update)
+                
+                elif message_type == "face_encoding":
+                    data = json.loads(sample.data)
+                    encoding = data['encoding']
+                    name = data['name']
+
+                    face_encoding = FaceEncoding()
+                    face_encoding.encoding = list(encoding)
+                    face_encoding.name = name
+                    face_encoding.external = True  # This face encoding came from an external agent
+
+                    print("Received face encoding via DDS")
+
+                    self.face_encoding_publisher.publish(face_encoding)
             else:
                 # This was a message to the agent, we can safely ignore
                 continue
@@ -176,6 +192,7 @@ class DataSubscriber:
         self.object_sensor_publisher = rospy.Publisher('/object_from_sensor', DetectedObjectArray, queue_size=10)
         self.path_publisher = rospy.Publisher('/path_from_agent', AgentPath, queue_size=10)
         self.map_update_publisher = rospy.Publisher('/map_update', MapUpdate, queue_size=10)
+        self.face_encoding_publisher = rospy.Publisher('/new_face_encoding', FaceEncoding, queue_size=10)
 
         self.subscribed_agents = set()
         self.agents_to_subscribe = set()
@@ -235,7 +252,9 @@ class DataSubscriber:
                 for agent_id in new_agents:
                     print(f"    Subscribed to agent {agent_id} data")
                     new_data_topic = Topic(self.participant, 'DataTopic' + str(agent_id), DataMessage)
-                    self.data_listeners[agent_id] = DataListener(self.my_id, agent_id, self.object_publisher, self.object_sensor_publisher, self.path_publisher, self.map_update_publisher)
+                    self.data_listeners[agent_id] = DataListener(self.my_id, agent_id, self.object_publisher, 
+                                                                    self.object_sensor_publisher, self.path_publisher, 
+                                                                    self.map_update_publisher, self.face_encoding_publisher)
                     self.data_listeners[agent_id].update_transformation(self.R, self.t)
                     self.data_readers[agent_id] = DataReader(self.subscriber, new_data_topic, listener=self.data_listeners[agent_id], qos=reliable_qos)
 

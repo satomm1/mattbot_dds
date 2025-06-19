@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="2">
   <name>mattbot_dds</name>
-  <version>0.0.0</version>
+  <version>1.0.0</version>
   <description>The mattbot_dds package</description>
 
   <!-- One maintainer tag required, multiple allowed, one person per tag -->
@@ -17,7 +17,7 @@
   <!-- Url tags are optional, but multiple are allowed, one per tag -->
   <!-- Optional attribute type can be: website, bugtracker, or repository -->
   <!-- Example: -->
-  <!-- <url type="website">http://wiki.ros.org/my_package</url> -->
+  <url type="repository">https://github.com/satomm1/mattbot_dds</url>
 
 
   <!-- Author tags are optional, multiple are allowed, one per tag -->

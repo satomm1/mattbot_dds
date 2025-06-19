@@ -84,7 +84,7 @@ class LocationListener(Listener):
                 self.locations = (x, y, theta)
 
                 agent_location = AgentLocation()
-                agent_location.agentID = int(sample.agent_id)
+                agent_location.agentID.data = int(sample.agent_id)
                 agent_location.pose.position.x = x
                 agent_location.pose.position.y = y
                 agent_location.pose.position.z = 0.0
