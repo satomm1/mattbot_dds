@@ -53,7 +53,7 @@ class DataPublisher:
         self.t = None
         transformation_subscriber = rospy.Subscriber('transformation_matrix', Float64MultiArray, self.transformation_callback)
 
-        self.cone_subscriber = rospy.Subscriber('/new_cone_map', DetectedObject, self.cone_callback, queue_size=10)
+        self.object_subscriber = rospy.Subscriber('/confirmed_objects', DetectedObject, self.confirmed_object_callback, queue_size=10)
         self.path_subscriber = rospy.Subscriber('/cmd_smoothed_path', Path, self.path_callback, queue_size=10)
         self.voice_goal_subscriber = rospy.Subscriber('/voice_goal', Pose2D, self.voice_goal_callback, queue_size=10)
 
@@ -93,7 +93,7 @@ class DataPublisher:
             new_point_theta = points[2,:] - np.arctan2(self.R[1, 0], self.R[0, 0])
             return np.concatenate((new_point_xy, [new_point_theta]))
 
-    def cone_callback(self, msg):
+    def confirmed_object_callback(self, msg):
 
         # First update the pose in msg to the new frame
         x = msg.pose.position.x
@@ -102,13 +102,13 @@ class DataPublisher:
         msg.pose.position.x = new_point[0]
         msg.pose.position.y = new_point[1]
 
-        cone_message = DataMessage(
+        object_message = DataMessage(
             message_type="detected_object",
             sending_agent=int(self.my_id),
             timestamp=int(time.time()),
             data=json.dumps(message_converter.convert_ros_message_to_dictionary(msg))
         )
-        self.data_writer.write(cone_message)
+        self.data_writer.write(object_message)
         time.sleep(0.01)
 
     def path_callback(self, msg):
