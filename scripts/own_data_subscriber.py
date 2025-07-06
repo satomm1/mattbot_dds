@@ -3,7 +3,7 @@ from rospy_message_converter import message_converter
 import tf
 import rospkg
 from mattbot_image_detection.msg import DetectedObject
-from geometry_msgs.msg import Pose, Pose2D
+from geometry_msgs.msg import Pose, Pose2D, PoseWithCovarianceStamped
 from std_msgs.msg import Float64MultiArray, UInt32
 
 from cyclonedds.domain import DomainParticipant, DomainParticipantQos
@@ -36,6 +36,7 @@ class SelfDataListener(Listener):
         self.topic_id = topic_id
         self.goal_pub = rospy.Publisher('/external_goal', Pose2D, queue_size=10)
         self.send_unknown_images_pub = rospy.Publisher('/send_unknown_images', UInt32, queue_size=10)
+        self.init_pub = rospy.Publisher('/initialpose', PoseWithCovarianceStamped, queue_size=10)
 
         self.R = None
         self.t = None
@@ -68,6 +69,30 @@ class SelfDataListener(Listener):
                 goal_msg.y = y
                 goal_msg.theta = theta
                 self.goal_pub.publish(goal_msg)
+            elif message_type == "position_init":
+                # Transform the position to this occupancy grid
+                x, y, theta = self.transform_point([data['x'], data['y'], data['theta']], forward=False)
+
+                # Check that timestamp is recent
+                current_time = rospy.Time.now()
+                message_time = rospy.Time.from_sec(timestamp)
+                if (current_time - message_time).to_sec() > 5.0:
+                    continue
+
+                print(f"Received position_init message from agent {sending_agent}: x={x}, y={y}, theta={theta}")
+                init_msg = PoseWithCovarianceStamped()
+                init_msg.header.stamp = rospy.Time.now()
+                init_msg.header.frame_id = "map"  # Assuming the frame is 'map'
+                init_msg.pose.pose.position.x = x
+                init_msg.pose.pose.position.y = y
+                init_msg.pose.pose.position.z = 0.0  # Assuming a 2D position
+                orientation = tf.transformations.quaternion_from_euler(0, 0, theta)
+                init_msg.pose.pose.orientation.x = orientation[0]
+                init_msg.pose.pose.orientation.y = orientation[1]
+                init_msg.pose.pose.orientation.z = orientation[2]
+                init_msg.pose.pose.orientation.w = orientation[3]
+                
+                self.init_pub.publish(init_msg)
             elif message_type == "send_unknown_images":
                 # Publish to topic to let the image detection node know to send unknown images
                 # We need to send the agent id to which the images should be sent
