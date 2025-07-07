@@ -3,7 +3,7 @@ from rospy_message_converter import message_converter
 import tf
 import rospkg
 from mattbot_image_detection.msg import DetectedObject, DetectedObjectArray
-# from image_detection_with_unknowns import LabeledObject, LabeledObjectArray
+from mattbot_image_detection.msg import LabeledObject, LabeledObjectArray
 from sensor_msgs.msg import Image
 from mattbot_dds.msg import AgentSubscription, AgentPath, AgentLocation
 from nav_msgs.msg import Path
@@ -58,6 +58,7 @@ class DataPublisher:
         self.path_subscriber = rospy.Subscriber('/cmd_smoothed_path', Path, self.path_callback, queue_size=10)
         self.voice_goal_subscriber = rospy.Subscriber('/voice_goal', Pose2D, self.voice_goal_callback, queue_size=10)
         self.new_face_encoding_subscriber = rospy.Subscriber('/new_face_encoding', FaceEncoding, self.face_encoding_callback, queue_size=10)
+        self.llm_image_subscriber = rospy.Subscriber('/labeled_unknown_objects', LabeledObjectArray, self.labeled_callback, queue_size=3)
 
     def transformation_callback(self, data):
         # Get the transformation matrix
@@ -112,6 +113,25 @@ class DataPublisher:
         )
         self.data_writer.write(object_message)
         time.sleep(0.01)
+
+    def labeled_callback(self, msg):
+        for obj in msg.objects:
+            x = obj.pose.position.x
+            y = obj.pose.position.y
+            new_point = self.transform_point([x, y, 0])
+            new_msg = DetectedObject()
+            new_msg.class_name = obj.class_name
+            new_msg.pose.position.x = new_point[0]
+            new_msg.pose.position.y = new_point[1]
+
+            object_message = DataMessage(
+                message_type="detected_object",
+                sending_agent=int(self.my_id),
+                timestamp=int(time.time()),
+                data=json.dumps(message_converter.convert_ros_message_to_dictionary(new_msg))
+            )
+            self.data_writer.write(object_message)
+            time.sleep(0.01)
 
     def path_callback(self, msg):
         
