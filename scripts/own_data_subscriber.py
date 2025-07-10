@@ -91,6 +91,12 @@ class SelfDataListener(Listener):
                 init_msg.pose.pose.orientation.y = orientation[1]
                 init_msg.pose.pose.orientation.z = orientation[2]
                 init_msg.pose.pose.orientation.w = orientation[3]
+
+                covariance = np.zeros((6, 6))
+                covariance[0, 0] = 0.25  # Variance in x
+                covariance[1, 1] = 0.25  # Variance in y
+                covariance[5, 5] = 6.28   # Variance in theta
+                init_msg.pose.covariance = covariance.flatten().tolist()
                 
                 self.init_pub.publish(init_msg)
             elif message_type == "send_unknown_images":
