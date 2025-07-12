@@ -1,5 +1,5 @@
 import rospy
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64MultiArray, Int32
 import tf
 
 from cyclonedds.domain import DomainParticipant, DomainParticipantQos
@@ -44,6 +44,9 @@ class LocationPublisher:
         self.t = None
         transformation_subscriber = rospy.Subscriber('transformation_matrix', Float64MultiArray, self.transformation_callback)
 
+        self.is_static = False
+        robot_mode_subscriber = rospy.Subscriber("/robot_mode", Int32, self.robot_mode_callback)
+
     def transformation_callback(self, data):
         # Get the transformation matrix
         transformation_matrix = data.data
@@ -51,6 +54,12 @@ class LocationPublisher:
         # Reshape the transformation matrix
         self.R = np.array(transformation_matrix[:4]).reshape(2, 2)
         self.t = np.array(transformation_matrix[4:])
+
+    def robot_mode_callback(self, data):
+        if data.data == 0:
+            self.is_static = True
+        else:
+            self.is_static = False
 
     def transform_point(self, point, forward=True):
         if self.R is None:
@@ -79,7 +88,7 @@ class LocationPublisher:
 
                 transformed_point = self.transform_point([x, y, theta])
                 x_new, y_new, theta_new = transformed_point
-                location = Location(int(self.my_id), int(time.time()), x_new, y_new, theta_new)
+                location = Location(int(self.my_id), int(time.time()), x_new, y_new, theta_new, self.is_static)
                 self.location_writer.write(location)
 
             except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:

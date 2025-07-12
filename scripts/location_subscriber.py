@@ -95,6 +95,8 @@ class LocationListener(Listener):
                 agent_location.pose.orientation.z = quaternion[2]
                 agent_location.pose.orientation.w = quaternion[3]
 
+                agent_location.isStatic.data = sample.static
+
                 self.agent_location_publisher.publish(agent_location)
 
     def get_locations(self):

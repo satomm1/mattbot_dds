@@ -71,12 +71,14 @@ class Location(IdlStruct):
         x (float): The x-coordinate of the agent.
         y (float): The y-coordinate of the agent.
         theta (float): The orientation of the agent.
+        static (bool): Indicates if the agent is currently moving towards a goal or is static
     """
     agent_id: int
     timestamp: int
     x: float
     y: float
     theta: float
+    static: bool
 
 
 # Create different policies for the DDS entities
