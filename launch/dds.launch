@@ -1,4 +1,7 @@
 <launch>
+
+    <arg name="sqlite" default="false"/>
+
     <node name="agent_entry_exit" pkg="mattbot_dds" type="entry_exit2.py" output="screen"/>
     <node name="heartbeat_publisher" pkg="mattbot_dds" type="heartbeat_publisher.py" output="screen"/>
     <node name="heartbeat_subscriber" pkg="mattbot_dds" type="heartbeat_subscriber.py" output="screen"/>
@@ -6,5 +9,7 @@
     <node name="location_publisher" pkg="mattbot_dds" type="location_publisher.py" output="screen"/>
     <node name="data_publisher" pkg="mattbot_dds" type="data_publisher.py" output="screen"/>
     <node name="data_subscriber" pkg="mattbot_dds" type="data_subscriber.py" output="screen"/>
-    <node name="own_data_subscriber" pkg="mattbot_dds" type="own_data_subscriber.py" output="screen"/>
+    <node name="own_data_subscriber" pkg="mattbot_dds" type="own_data_subscriber.py" output="screen">
+        <param name="sqlite" value="$(arg sqlite)"/>
+    </node>
 </launch>
