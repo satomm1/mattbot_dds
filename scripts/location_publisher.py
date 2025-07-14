@@ -18,7 +18,7 @@ import numpy as np
 
 from dds_utils import Location, best_effort_qos
 
-LOCATION_PERIOD = 1    # seconds
+LOCATION_PERIOD = 0.5    # seconds
 
 class LocationPublisher:
     def __init__(self):
