@@ -94,7 +94,7 @@ class DataListener(Listener):
                     print("Received object from agent " + str(self.topic_id))
 
                     if self.db is not None:
-                        self.db.add_object(new_object.class_name, new_object.pose.position.x, new_object.pose.position.y, self.topic_id)
+                        self.db.add_object(new_object.class_name, new_object.pose.position.x, new_object.pose.position.y, self.topic_id, timestamp)
                 elif message_type == "sensor_detected_objects":
                     x = data['x']
                     y = data['y']

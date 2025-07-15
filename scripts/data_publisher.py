@@ -124,7 +124,7 @@ class DataPublisher:
 
         if self.db is not None:
             # Save the object to the SQLite database
-            self.db.add_object(msg.class_name, msg.pose.position.x, msg.pose.position.y, self.my_id)
+            self.db.add_object(msg.class_name, msg.pose.position.x, msg.pose.position.y, self.my_id, int(time.time()))
 
     def labeled_callback(self, msg):
         for obj in msg.objects:
