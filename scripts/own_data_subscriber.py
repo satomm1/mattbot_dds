@@ -16,7 +16,7 @@ from cyclonedds.idl.types import sequence
 from cyclonedds.core import Qos, Policy, Listener
 from cyclonedds.builtin import BuiltinDataReader, BuiltinTopicDcpsParticipant
 
-import sqlite3
+from database_utils import RobotDatabase
 
 import time
 import os
@@ -32,7 +32,7 @@ from dds_utils import DataMessage, reliable_qos
 
 class SelfDataListener(Listener):
 
-    def __init__(self, my_id, topic_id, sqlite=False):
+    def __init__(self, my_id, topic_id, sqlite_db=None):
         super().__init__()
         self.my_id = my_id
         self.topic_id = topic_id
@@ -41,7 +41,7 @@ class SelfDataListener(Listener):
         self.init_pub = rospy.Publisher('/initialpose', PoseWithCovarianceStamped, queue_size=10)
 
         # Database connection
-        self.sqlite = sqlite
+        self.db = sqlite_db
 
         self.R = None
         self.t = None
@@ -75,15 +75,8 @@ class SelfDataListener(Listener):
                 goal_msg.theta = theta
                 self.goal_pub.publish(goal_msg)
 
-                if self.sqlite:
-                    conn = sqlite3.connect('/workspace/catkin_ws/src/mattbot_dds/scripts/robot_data.db')
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "INSERT INTO goals (robot_id, x, y, theta) VALUES (?, ?, ?, ?)",
-                        (self.my_id, x, y, theta)
-                    )
-                    conn.commit()
-                    conn.close()
+                if self.db is not None:
+                    self.db.add_goal(self.my_id, x, y, theta, timestamp)
             elif message_type == "position_init":
                 # Transform the position to this occupancy grid
                 x, y, theta = self.transform_point([data['x'], data['y'], data['theta']], forward=False)
@@ -151,46 +144,10 @@ class OwnDataSubscriber:
 
         # Get sqlite parameter
         self.sqlite = rospy.get_param('~sqlite', False)
+        self.db = None
         if self.sqlite:
-            db_exists = os.path.exists('/workspace/catkin_ws/src/mattbot_dds/scripts/robot_data.db')
-            conn = sqlite3.connect('/workspace/catkin_ws/src/mattbot_dds/scripts/robot_data.db')
-            cursor = conn.cursor()
-
-            if not db_exists:
-                cursor.execute('''
-                CREATE TABLE robots (
-                    robot_id INTEGER PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    description TEXT
-                )
-                ''')
-                
-                cursor.execute('''
-                CREATE TABLE goals (
-                    goal_id INTEGER PRIMARY KEY,
-                    robot_id INTEGER NOT NULL,
-                    x REAL NOT NULL,
-                    y REAL NOT NULL,
-                    theta REAL NOT NULL,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (robot_id) REFERENCES robots (robot_id)
-                )
-                ''')
-
-                cursor.execute('''
-                CREATE TABLE objects (
-                    object_id INTEGER PRIMARY KEY,
-                    class_name TEXT NOT NULL,
-                    x REAL NOT NULL,
-                    y REAL NOT NULL,
-                    theta REAL NOT NULL,
-                    robot_id INTEGER,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-                ''')
-
-                conn.commit()
-            conn.close()
+            self.db = RobotDatabase()
+            self.db.create_goals_table()
 
         # Create a DomainParticipant, Subscriber, and Publisher
         self.participant = DomainParticipant()
@@ -199,7 +156,7 @@ class OwnDataSubscriber:
 
         # Create my data topic
         self.data_topic = Topic(self.participant, 'DataTopic' + str(self.my_id), DataMessage)
-        self.data_listener = SelfDataListener(self.my_id, self.my_id, sqlite=self.sqlite)
+        self.data_listener = SelfDataListener(self.my_id, self.my_id, sqlite_db=self.db)
         self.data_reader = DataReader(self.subscriber, self.data_topic, listener=self.data_listener, qos=reliable_qos)
 
         self.R = None
