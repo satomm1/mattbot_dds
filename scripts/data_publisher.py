@@ -137,7 +137,7 @@ class DataPublisher:
             new_msg.pose.position.y = new_point[1]
 
             object_message = DataMessage(
-                message_type="detected_object",
+                message_type="llm_detected_object",
                 sending_agent=int(self.my_id),
                 timestamp=int(time.time()),
                 data=json.dumps(message_converter.convert_ros_message_to_dictionary(new_msg))
