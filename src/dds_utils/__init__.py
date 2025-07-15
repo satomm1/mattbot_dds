@@ -80,6 +80,26 @@ class Location(IdlStruct):
     theta: float
     static: bool
 
+@dataclass
+class ImageMessage(IdlStruct):
+    """
+    Represents an image message.
+
+    Attributes:
+        agent_id (int): The ID of the agent sending the image.
+        timestamp (int): The timestamp of the image message.
+        data (bytes): The image data in bytes.
+        width (int): The width of the image.
+        height (int): The height of the image.
+        encoding (str): The encoding format of the image.
+    """
+    agent_id: int
+    timestamp: int
+    data: sequence[int]
+    width: int
+    height: int
+    encoding: str
+
 
 # Create different policies for the DDS entities
 reliable_qos = Qos(
