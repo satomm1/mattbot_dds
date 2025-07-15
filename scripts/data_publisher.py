@@ -21,6 +21,8 @@ from cyclonedds.idl.types import sequence
 from cyclonedds.core import Qos, Policy, Listener
 from cyclonedds.builtin import BuiltinDataReader, BuiltinTopicDcpsParticipant
 
+import sqlite3
+
 import time
 import os
 import hashlib
@@ -37,6 +39,9 @@ class DataPublisher:
         rospy.init_node('dds_data_publisher', anonymous=True)
 
         self.my_id = os.environ.get('ROBOT_ID')
+
+        # Get sqlite parameter
+        self.sqlite = rospy.get_param('~sqlite', False)
 
         self.lease_duration_ms = 30000
         qos_profile = DomainParticipantQos()
@@ -113,6 +118,17 @@ class DataPublisher:
         )
         self.data_writer.write(object_message)
         time.sleep(0.01)
+
+        if self.sqlite:
+            # Save the object to the SQLite database
+            conn = sqlite3.connect('/workspace/catkin_ws/src/mattbot_dds/scripts/robot_data.db')
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO objects (class_name, x, y, robot_id)
+                VALUES (?, ?, ?, ?)
+            ''', (msg.class_name, msg.pose.position.x, msg.pose.position.y, self.my_id))
+            conn.commit()
+            conn.close()
 
     def labeled_callback(self, msg):
         for obj in msg.objects:

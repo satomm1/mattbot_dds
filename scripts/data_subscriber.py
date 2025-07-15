@@ -21,6 +21,8 @@ from cyclonedds.idl.types import sequence
 from cyclonedds.core import Qos, Policy, Listener
 from cyclonedds.builtin import BuiltinDataReader, BuiltinTopicDcpsParticipant
 
+import sqlite3
+
 import time
 import os
 import json
@@ -35,7 +37,7 @@ from dds_utils import DataMessage, reliable_qos
 
 class DataListener(Listener):
 
-    def __init__(self, my_id, topic_id, object_publisher, object_sensor_publisher, path_publisher, map_update_publisher, face_encoding_publisher):
+    def __init__(self, my_id, topic_id, object_publisher, object_sensor_publisher, path_publisher, map_update_publisher, face_encoding_publisher, sqlite=False):
         super().__init__()
         self.my_id = my_id
         self.topic_id = topic_id
@@ -44,6 +46,8 @@ class DataListener(Listener):
         self.path_publisher = path_publisher
         self.map_update_publisher = map_update_publisher
         self.face_encoding_publisher = face_encoding_publisher
+        
+        self.sqlite = sqlite
 
         self.R = None
         self.t = None
@@ -88,6 +92,17 @@ class DataListener(Listener):
 
                     self.object_publisher.publish(new_object)
                     print("Received object from agent " + str(self.topic_id))
+
+                    if self.sqlite:
+                        # Save the detected object to SQLite database
+                        conn = sqlite3.connect('/workspace/catkin_ws/src/mattbot_dds/scripts/robot_data.db')
+                        cursor = conn.cursor()
+                        cursor.execute('''
+                            INSERT INTO objects (class_name, x, y, robot_id)
+                            VALUES (?, ?, ?, ?)
+                        ''', (new_object.class_name, new_object.pose.position.x, new_object.pose.position.y, self.topic_id))
+                        conn.commit()
+                        conn.close()
                 elif message_type == "sensor_detected_objects":
                     x = data['x']
                     y = data['y']
@@ -177,6 +192,48 @@ class DataSubscriber:
         self.my_id = os.environ.get('ROBOT_ID')
         self.agents_subscribed = set()
 
+        # Get sqlite parameter
+        self.sqlite = rospy.get_param('~sqlite', False)
+        if self.sqlite:
+            db_exists = os.path.exists('/workspace/catkin_ws/src/mattbot_dds/scripts/robot_data.db')
+            conn = sqlite3.connect('/workspace/catkin_ws/src/mattbot_dds/scripts/robot_data.db')
+            cursor = conn.cursor()
+
+            if not db_exists:
+                cursor.execute('''
+                CREATE TABLE robots (
+                    robot_id INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT
+                )
+                ''')
+                
+                cursor.execute('''
+                CREATE TABLE goals (
+                    goal_id INTEGER PRIMARY KEY,
+                    robot_id INTEGER NOT NULL,
+                    x REAL NOT NULL,
+                    y REAL NOT NULL,
+                    theta REAL NOT NULL,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (robot_id) REFERENCES robots (robot_id)
+                )
+                ''')
+
+                cursor.execute('''
+                CREATE TABLE objects (
+                    object_id INTEGER PRIMARY KEY,
+                    class_name TEXT NOT NULL,
+                    x REAL NOT NULL,
+                    y REAL NOT NULL,
+                    robot_id INTEGER,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                ''')
+
+                conn.commit()
+            conn.close()    
+
         # Create a DomainParticipant, Subscriber, and Publisher
         self.participant = DomainParticipant()
         self.subscriber = Subscriber(self.participant)
@@ -254,7 +311,7 @@ class DataSubscriber:
                     new_data_topic = Topic(self.participant, 'DataTopic' + str(agent_id), DataMessage)
                     self.data_listeners[agent_id] = DataListener(self.my_id, agent_id, self.object_publisher, 
                                                                     self.object_sensor_publisher, self.path_publisher, 
-                                                                    self.map_update_publisher, self.face_encoding_publisher)
+                                                                    self.map_update_publisher, self.face_encoding_publisher, sqlite=self.sqlite)
                     self.data_listeners[agent_id].update_transformation(self.R, self.t)
                     self.data_readers[agent_id] = DataReader(self.subscriber, new_data_topic, listener=self.data_listeners[agent_id], qos=reliable_qos)
 
@@ -274,6 +331,8 @@ class DataSubscriber:
 
     def shutdown(self):
         print("Shutting down DDS Data Subscriber")
+        if self.conn:
+            self.conn.close()
 
 
 if __name__ == '__main__':

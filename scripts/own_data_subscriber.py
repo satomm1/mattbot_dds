@@ -83,6 +83,7 @@ class SelfDataListener(Listener):
                         (self.my_id, x, y, theta)
                     )
                     conn.commit()
+                    conn.close()
             elif message_type == "position_init":
                 # Transform the position to this occupancy grid
                 x, y, theta = self.transform_point([data['x'], data['y'], data['theta']], forward=False)
@@ -150,7 +151,6 @@ class OwnDataSubscriber:
 
         # Get sqlite parameter
         self.sqlite = rospy.get_param('~sqlite', False)
-        print("SQLITE enabled:", self.sqlite)
         if self.sqlite:
             db_exists = os.path.exists('/workspace/catkin_ws/src/mattbot_dds/scripts/robot_data.db')
             conn = sqlite3.connect('/workspace/catkin_ws/src/mattbot_dds/scripts/robot_data.db')
@@ -177,7 +177,20 @@ class OwnDataSubscriber:
                 )
                 ''')
 
+                cursor.execute('''
+                CREATE TABLE objects (
+                    object_id INTEGER PRIMARY KEY,
+                    class_name TEXT NOT NULL,
+                    x REAL NOT NULL,
+                    y REAL NOT NULL,
+                    theta REAL NOT NULL,
+                    robot_id INTEGER,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                ''')
+
                 conn.commit()
+            conn.close()
 
         # Create a DomainParticipant, Subscriber, and Publisher
         self.participant = DomainParticipant()
