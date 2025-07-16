@@ -288,8 +288,6 @@ class DataSubscriber:
 
     def shutdown(self):
         print("Shutting down DDS Data Subscriber")
-        if self.conn:
-            self.conn.close()
 
 
 if __name__ == '__main__':
