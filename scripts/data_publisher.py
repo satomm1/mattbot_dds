@@ -67,6 +67,7 @@ class DataPublisher:
         self.voice_goal_subscriber = rospy.Subscriber('/voice_goal', Pose2D, self.voice_goal_callback, queue_size=10)
         self.new_face_encoding_subscriber = rospy.Subscriber('/new_face_encoding', FaceEncoding, self.face_encoding_callback, queue_size=10)
         self.llm_image_subscriber = rospy.Subscriber('/labeled_unknown_objects', LabeledObjectArray, self.labeled_callback, queue_size=3)
+        self.invalid_goal_subscriber = rospy.Subscriber('/invalid_goal', Pose2D, self.invalid_goal_callback, queue_size=10)
 
     def transformation_callback(self, data):
         # Get the transformation matrix
@@ -201,6 +202,24 @@ class DataPublisher:
             })
         )
         self.data_writer.write(face_encoding_message)
+        time.sleep(0.01)
+
+    def invalid_goal_callback(self, msg):
+        x = msg.x
+        y = msg.y
+        th = msg.theta
+        new_point = self.transform_point([x, y, th])
+        msg.x = new_point[0]
+        msg.y = new_point[1]
+        msg.theta = new_point[2]
+
+        goal_message = DataMessage(
+            message_type="invalid_goal",
+            sending_agent=int(self.my_id),
+            timestamp=int(time.time()),
+            data=json.dumps(message_converter.convert_ros_message_to_dictionary(msg))
+        )
+        self.data_writer.write(goal_message)
         time.sleep(0.01)
 
     def run(self):
