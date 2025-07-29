@@ -68,7 +68,7 @@ class DataPublisher:
         self.new_face_encoding_subscriber = rospy.Subscriber('/new_face_encoding', FaceEncoding, self.face_encoding_callback, queue_size=10)
         self.llm_image_subscriber = rospy.Subscriber('/labeled_unknown_objects', LabeledObjectArray, self.labeled_callback, queue_size=3)
         self.invalid_goal_subscriber = rospy.Subscriber('/invalid_goal', Pose2D, self.invalid_goal_callback, queue_size=10)
-        # self.detected_object_subscriber = rospy.Subscriber('/detected_objects', DetectedObjectArray, self.detected_object_callback, queue_size=10)
+        self.detected_object_subscriber = rospy.Subscriber('/detected_objects', DetectedObjectArray, self.detected_object_callback, queue_size=10)
 
     def transformation_callback(self, data):
         # Get the transformation matrix
@@ -147,28 +147,27 @@ class DataPublisher:
             self.data_writer.write(object_message)
             time.sleep(0.01)
 
-    # def detected_object_callback(self, msg):
-    #     for obj in msg.objects:
-    #         class_name = obj.class_name
-    #         print(class_name)
-    #         if class_name == "person":
-    #             x = obj.pose.position.x
-    #             y = obj.pose.position.y
-    #             new_point = self.transform_point([x, y, 0])
+    def detected_object_callback(self, msg):
+        for obj in msg.objects:
+            class_name = obj.class_name
+            if class_name == "person":
+                x = obj.pose.position.x
+                y = obj.pose.position.y
+                new_point = self.transform_point([x, y, 0])
                 
-    #             new_msg = DetectedObject()
-    #             new_msg.class_name = class_name
-    #             new_msg.pose.position.x = new_point[0]
-    #             new_msg.pose.position.y = new_point[1]
+                new_msg = DetectedObject()
+                new_msg.class_name = class_name
+                new_msg.pose.position.x = new_point[0]
+                new_msg.pose.position.y = new_point[1]
 
-    #             object_message = DataMessage(
-    #                 message_type="person_detected",
-    #                 sending_agent=int(self.my_id),
-    #                 timestamp=int(time.time()),
-    #                 data=json.dumps(message_converter.convert_ros_message_to_dictionary(new_msg))
-    #             )
-    #             self.data_writer.write(object_message)
-    #             time.sleep(0.01)
+                object_message = DataMessage(
+                    message_type="person_detected",
+                    sending_agent=int(self.my_id),
+                    timestamp=int(time.time()),
+                    data=json.dumps(message_converter.convert_ros_message_to_dictionary(new_msg))
+                )
+                self.data_writer.write(object_message)
+                time.sleep(0.01)
 
     def path_callback(self, msg):
         
