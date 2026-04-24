@@ -1,6 +1,11 @@
 <launch>
 
     <arg name="sqlite" default="false"/>
+    <!-- Forwarder subscribes to global_observe_start_dds_trigger_topic (not /global_observe_start) so any robot can run publish_global_observe_start without echo. -->
+    <arg name="forward_global_observe_start_via_dds" default="true"/>
+    <arg name="relay_global_observe_start_from_dds" default="true"/>
+    <arg name="global_observe_start_ros_topic" default="/global_observe_start"/>
+    <arg name="global_observe_start_dds_trigger_topic" default="/global_observe_start_dds"/>
 
     <node name="agent_entry_exit" pkg="mattbot_dds" type="entry_exit2.py" output="screen"/>
     <node name="heartbeat_publisher" pkg="mattbot_dds" type="heartbeat_publisher.py" output="screen"/>
@@ -10,10 +15,14 @@
     
     <node name="data_publisher" pkg="mattbot_dds" type="data_publisher.py" output="screen">
         <param name="sqlite" value="$(arg sqlite)"/>
+        <param name="forward_global_observe_start_via_dds" value="$(arg forward_global_observe_start_via_dds)"/>
+        <param name="global_observe_start_dds_trigger_topic" value="$(arg global_observe_start_dds_trigger_topic)"/>
     </node>
 
     <node name="data_subscriber" pkg="mattbot_dds" type="data_subscriber.py" output="screen">
         <param name="sqlite" value="$(arg sqlite)"/>
+        <param name="relay_global_observe_start_from_dds" value="$(arg relay_global_observe_start_from_dds)"/>
+        <param name="global_observe_start_ros_topic" value="$(arg global_observe_start_ros_topic)"/>
     </node>
 
     <node name="own_data_subscriber" pkg="mattbot_dds" type="own_data_subscriber.py" output="screen">

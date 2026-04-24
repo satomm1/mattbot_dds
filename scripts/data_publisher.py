@@ -8,7 +8,7 @@ from sensor_msgs.msg import Image
 from mattbot_dds.msg import AgentSubscription, AgentPath, AgentLocation
 from nav_msgs.msg import Path
 from geometry_msgs.msg import Pose, Pose2D
-from std_msgs.msg import Float32MultiArray, Float64MultiArray, Int16MultiArray
+from std_msgs.msg import Float32MultiArray, Float64MultiArray, Int16MultiArray, Time as RosTimeMsg
 from mattbot_image_detection.msg import FaceEncoding
 
 from cyclonedds.domain import DomainParticipant, DomainParticipantQos
@@ -31,7 +31,7 @@ import json
 import requests
 import numpy as np
 
-from dds_utils import DataMessage, reliable_qos
+from dds_utils import DataMessage, reliable_qos, MSG_GLOBAL_OBSERVE_START
 
 class DataPublisher:
 
@@ -88,6 +88,37 @@ class DataPublisher:
                 self._star_gru_out_ego_callback,
                 queue_size=2,
             )
+
+        # Subscribe only to the DDS trigger topic (not /global_observe_start) so peers can
+        # relay to /global_observe_start without echoing back onto DDS.
+        self._forward_global_observe = bool(rospy.get_param("~forward_global_observe_start_via_dds", True))
+        self._global_observe_dds_trigger_topic = rospy.get_param(
+            "~global_observe_start_dds_trigger_topic", "/global_observe_start_dds"
+        ).strip() or "/global_observe_start_dds"
+        self._sub_global_observe = None
+        if self._forward_global_observe:
+            self._sub_global_observe = rospy.Subscriber(
+                self._global_observe_dds_trigger_topic,
+                RosTimeMsg,
+                self._global_observe_start_callback,
+                queue_size=2,
+            )
+            rospy.loginfo(
+                "dds_data_publisher: forwarding %s to DDS as %s (ROBOT_ID=%s)",
+                self._global_observe_dds_trigger_topic,
+                MSG_GLOBAL_OBSERVE_START,
+                self.my_id,
+            )
+
+    def _global_observe_start_callback(self, msg: RosTimeMsg):
+        aid = int(self.my_id) if self.my_id is not None else 0
+        dm = DataMessage(
+            message_type=MSG_GLOBAL_OBSERVE_START,
+            sending_agent=aid,
+            timestamp=int(time.time()),
+            data=json.dumps({"sec": int(msg.data.secs), "nsec": int(msg.data.nsecs)}),
+        )
+        self.data_writer.write(dm)
 
     def _star_encoder_callback(self, msg: Float32MultiArray):
         aid = int(self.my_id) if self.my_id is not None else 0

@@ -60,6 +60,11 @@ class DataMessage(IdlStruct):
     timestamp: int
     data: str
 
+
+# std_msgs/Time (wall ROS time) bridged fleet-wide; JSON {"sec": int, "nsec": int}.
+# ROS trigger topic defaults to /global_observe_start_dds (not /global_observe_start) to avoid relay echo.
+MSG_GLOBAL_OBSERVE_START = "global_observe_start"
+
 @dataclass
 class Location(IdlStruct):
     """

@@ -8,7 +8,7 @@ from sensor_msgs.msg import Image
 from mattbot_dds.msg import AgentSubscription, AgentPath, AgentLocation, MapUpdate
 from nav_msgs.msg import Path
 from geometry_msgs.msg import Pose, Pose2D
-from std_msgs.msg import Float32MultiArray, Float64MultiArray, Int16MultiArray
+from std_msgs.msg import Float32MultiArray, Float64MultiArray, Int16MultiArray, Time as RosTimeMsg
 from mattbot_image_detection.msg import FaceEncoding
 
 from cyclonedds.domain import DomainParticipant, DomainParticipantQos
@@ -28,7 +28,7 @@ import os
 import json
 import numpy as np
 
-from dds_utils import DataMessage, reliable_qos
+from dds_utils import DataMessage, reliable_qos, MSG_GLOBAL_OBSERVE_START
 
 ##################################################
 # This script is used to subscribe to various DataTopics
@@ -37,7 +37,7 @@ from dds_utils import DataMessage, reliable_qos
 
 class DataListener(Listener):
 
-    def __init__(self, my_id, topic_id, object_publisher, object_sensor_publisher, path_publisher, map_update_publisher, face_encoding_publisher, sqlite_db=None):
+    def __init__(self, my_id, topic_id, object_publisher, object_sensor_publisher, path_publisher, map_update_publisher, face_encoding_publisher, global_observe_publisher=None, sqlite_db=None):
         super().__init__()
         self.my_id = my_id
         self.topic_id = topic_id
@@ -46,7 +46,8 @@ class DataListener(Listener):
         self.path_publisher = path_publisher
         self.map_update_publisher = map_update_publisher
         self.face_encoding_publisher = face_encoding_publisher
-        
+        self.global_observe_publisher = global_observe_publisher
+
         self.db = sqlite_db
 
         self.R = None
@@ -176,7 +177,23 @@ class DataListener(Listener):
                         self._pub_star_encoder.publish(out)
                     else:
                         self._pub_star_gru.publish(out)
-                
+
+                elif message_type == MSG_GLOBAL_OBSERVE_START:
+                    if self.global_observe_publisher is None:
+                        continue
+                    sec, nsec = data.get("sec"), data.get("nsec")
+                    if sec is None or nsec is None:
+                        continue
+                    tmsg = RosTimeMsg()
+                    tmsg.data.secs = int(sec)
+                    tmsg.data.nsecs = int(nsec)
+                    self.global_observe_publisher.publish(tmsg)
+                    rospy.loginfo(
+                        "dds_data_subscriber: relayed global_observe_start from agent %s -> %s",
+                        self.topic_id,
+                        tmsg.data,
+                    )
+
                 elif message_type == "face_encoding":
                     data = json.loads(sample.data)
                     encoding = data['encoding']
@@ -228,6 +245,22 @@ class DataSubscriber:
         self.path_publisher = rospy.Publisher('/path_from_agent', AgentPath, queue_size=10)
         self.map_update_publisher = rospy.Publisher('/map_update', MapUpdate, queue_size=10)
         self.face_encoding_publisher = rospy.Publisher('/new_face_encoding', FaceEncoding, queue_size=10)
+
+        self._global_observe_ros_topic = rospy.get_param("~global_observe_start_ros_topic", "/global_observe_start").strip() or "/global_observe_start"
+        self._relay_global_observe = bool(rospy.get_param("~relay_global_observe_start_from_dds", True))
+        self.global_observe_publisher = None
+        if self._relay_global_observe:
+            self.global_observe_publisher = rospy.Publisher(
+                self._global_observe_ros_topic,
+                RosTimeMsg,
+                queue_size=1,
+                latch=True,
+            )
+            rospy.loginfo(
+                "dds_data_subscriber: relaying %s from DDS to %s",
+                MSG_GLOBAL_OBSERVE_START,
+                self._global_observe_ros_topic,
+            )
 
         self.subscribed_agents = set()
         self.agents_to_subscribe = set()
@@ -287,9 +320,11 @@ class DataSubscriber:
                 for agent_id in new_agents:
                     print(f"    Subscribed to agent {agent_id} data")
                     new_data_topic = Topic(self.participant, 'DataTopic' + str(agent_id), DataMessage)
-                    self.data_listeners[agent_id] = DataListener(self.my_id, agent_id, self.object_publisher, 
-                                                                    self.object_sensor_publisher, self.path_publisher, 
-                                                                    self.map_update_publisher, self.face_encoding_publisher, sqlite_db=self.db)
+                    self.data_listeners[agent_id] = DataListener(self.my_id, agent_id, self.object_publisher,
+                                                                    self.object_sensor_publisher, self.path_publisher,
+                                                                    self.map_update_publisher, self.face_encoding_publisher,
+                                                                    global_observe_publisher=self.global_observe_publisher,
+                                                                    sqlite_db=self.db)
                     self.data_listeners[agent_id].update_transformation(self.R, self.t)
                     self.data_readers[agent_id] = DataReader(self.subscriber, new_data_topic, listener=self.data_listeners[agent_id], qos=reliable_qos)
 
