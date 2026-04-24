@@ -8,7 +8,7 @@ from sensor_msgs.msg import Image
 from mattbot_dds.msg import AgentSubscription, AgentPath, AgentLocation, MapUpdate
 from nav_msgs.msg import Path
 from geometry_msgs.msg import Pose, Pose2D
-from std_msgs.msg import Float64MultiArray, Int16MultiArray
+from std_msgs.msg import Float32MultiArray, Float64MultiArray, Int16MultiArray
 from mattbot_image_detection.msg import FaceEncoding
 
 from cyclonedds.domain import DomainParticipant, DomainParticipantQos
@@ -51,6 +51,16 @@ class DataListener(Listener):
 
         self.R = None
         self.t = None
+        self._pub_star_encoder = rospy.Publisher(
+            "/team/dds/star_encoder_state/" + str(topic_id),
+            Float32MultiArray,
+            queue_size=2,
+        )
+        self._pub_star_gru = rospy.Publisher(
+            "/team/dds/star_gru_out_ego/" + str(topic_id),
+            Float32MultiArray,
+            queue_size=2,
+        )
 
     def transform_point(self, point, forward=True):
         if self.R is None:
@@ -155,6 +165,17 @@ class DataListener(Listener):
         
                     # Publish the map update
                     self.map_update_publisher.publish(map_update)
+
+                elif message_type in ("star_encoder_state", "star_gru_out_ego"):
+                    vec = data.get("v")
+                    if not isinstance(vec, list):
+                        continue
+                    out = Float32MultiArray()
+                    out.data = [float(x) for x in vec]
+                    if message_type == "star_encoder_state":
+                        self._pub_star_encoder.publish(out)
+                    else:
+                        self._pub_star_gru.publish(out)
                 
                 elif message_type == "face_encoding":
                     data = json.loads(sample.data)

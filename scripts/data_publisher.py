@@ -8,7 +8,7 @@ from sensor_msgs.msg import Image
 from mattbot_dds.msg import AgentSubscription, AgentPath, AgentLocation
 from nav_msgs.msg import Path
 from geometry_msgs.msg import Pose, Pose2D
-from std_msgs.msg import Float64MultiArray, Int16MultiArray
+from std_msgs.msg import Float32MultiArray, Float64MultiArray, Int16MultiArray
 from mattbot_image_detection.msg import FaceEncoding
 
 from cyclonedds.domain import DomainParticipant, DomainParticipantQos
@@ -69,6 +69,45 @@ class DataPublisher:
         self.llm_image_subscriber = rospy.Subscriber('/labeled_unknown_objects', LabeledObjectArray, self.labeled_callback, queue_size=3)
         self.invalid_goal_subscriber = rospy.Subscriber('/invalid_goal', Pose2D, self.invalid_goal_callback, queue_size=10)
         self.detected_object_subscriber = rospy.Subscriber('/detected_objects', DetectedObjectArray, self.detected_object_callback, queue_size=10)
+
+        self._star_enc_topic = rospy.get_param("~star_encoder_ros_topic", "").strip()
+        self._star_gru_topic = rospy.get_param("~star_gru_out_ego_ros_topic", "").strip()
+        self._sub_star_enc = None
+        self._sub_star_gru = None
+        if self._star_enc_topic:
+            self._sub_star_enc = rospy.Subscriber(
+                self._star_enc_topic,
+                Float32MultiArray,
+                self._star_encoder_callback,
+                queue_size=2,
+            )
+        if self._star_gru_topic:
+            self._sub_star_gru = rospy.Subscriber(
+                self._star_gru_topic,
+                Float32MultiArray,
+                self._star_gru_out_ego_callback,
+                queue_size=2,
+            )
+
+    def _star_encoder_callback(self, msg: Float32MultiArray):
+        aid = int(self.my_id) if self.my_id is not None else 0
+        dm = DataMessage(
+            message_type="star_encoder_state",
+            sending_agent=aid,
+            timestamp=int(time.time()),
+            data=json.dumps({"v": [float(x) for x in msg.data]}),
+        )
+        self.data_writer.write(dm)
+
+    def _star_gru_out_ego_callback(self, msg: Float32MultiArray):
+        aid = int(self.my_id) if self.my_id is not None else 0
+        dm = DataMessage(
+            message_type="star_gru_out_ego",
+            sending_agent=aid,
+            timestamp=int(time.time()),
+            data=json.dumps({"v": [float(x) for x in msg.data]}),
+        )
+        self.data_writer.write(dm)
 
     def transformation_callback(self, data):
         # Get the transformation matrix
