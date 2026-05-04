@@ -1,128 +1,116 @@
-from cyclonedds.util import duration
-from cyclonedds.idl import IdlStruct
-from cyclonedds.idl.types import sequence
-from cyclonedds.core import Qos, Policy
-
-from dataclasses import dataclass
-
-@dataclass
-class Heartbeat(IdlStruct):
-    """
-    Represents a heartbeat message from an agent.
-
-    Attributes:
-        agent_id (int): The ID of the agent sending the heartbeat.
-        timestamp (int): The timestamp of the heartbeat message.
-        agent_type (str): The type of the agent sending the heartbeat.
-        location_valid (bool): Indicates if the agent's location is valid.
-        x (float): The x-coordinate of the agent's location.
-        y (float): The y-coordinate of the agent's location.
-        theta (float): The orientation of the agent.
-        topics (sequence[str]): A sequence of topics the agent is publishing to
-    """
-    agent_id: int
-    timestamp: int
-    agent_type: str
-    ip_address: str
-    location_valid: bool
-    x: float
-    y: float
-    theta: float
-    topics: sequence[str]
-
-@dataclass
-class EntryExit(IdlStruct):
-    agent_id: int
-    agent_type: str
-    action: str
-    ip_address: str
-    timestamp: int
-
-@dataclass
-class Initialization(IdlStruct):
-    """
-    Represents the initialization parameters for the agent entry/exit system.
-
-    Attributes:
-        target_agent (int): The ID of the target agent.
-        agents (str): A json dict of all the agents that the sending_agent is aware of.
-        known_points (str): 
-    """
-    target_agent: int
-    sending_agent: int
-    agents: str
-    known_points: str
-
-@dataclass
-class DataMessage(IdlStruct):
-    message_type: str
-    sending_agent: int
-    timestamp: int
-    data: str
-
-
-# std_msgs/Time (wall ROS time) bridged fleet-wide; JSON {"sec": int, "nsec": int}.
-# ROS trigger topic defaults to /global_observe_start_dds (not /global_observe_start) to avoid relay echo.
-MSG_GLOBAL_OBSERVE_START = "global_observe_start"
-
-# Directed goals for fleet coordination; JSON in DataMessage.data mirrors geometry_msgs/Pose2D fields
-# plus plan metadata (same frame contract as message_type "goal" after transform):
-#   x, y, theta — float
-#   plan_id — string
-#   coordinated — bool
-#   target_agent — int (should match the DataTopic{N} recipient)
-MSG_MULTI_ROBOT_GOAL = "multi_robot_goal"
-
-@dataclass
-class Location(IdlStruct):
-    """
-    Represents the location of an agent.
-
-    Attributes:
-        agent_id (int): The ID of the agent.
-        timestamp (int): The timestamp of the location message.
-        x (float): The x-coordinate of the agent.
-        y (float): The y-coordinate of the agent.
-        theta (float): The orientation of the agent.
-        static (bool): Indicates if the agent is currently moving towards a goal or is static
-    """
-    agent_id: int
-    timestamp: int
-    x: float
-    y: float
-    theta: float
-    static: bool
-
-@dataclass
-class ImageMessage(IdlStruct):
-    """
-    Represents an image message.
-
-    Attributes:
-        agent_id (int): The ID of the agent sending the image.
-        timestamp (int): The timestamp of the image message.
-        data (bytes): The image data in bytes.
-        width (int): The width of the image.
-        height (int): The height of the image.
-        encoding (str): The encoding format of the image.
-    """
-    agent_id: int
-    timestamp: int
-    data: sequence[int]
-    width: int
-    height: int
-    encoding: str
-
-
-# Create different policies for the DDS entities
-reliable_qos = Qos(
-    Policy.Reliability.Reliable(max_blocking_time=duration(milliseconds=10)),
-    Policy.Durability.TransientLocal,
-    Policy.History.KeepLast(depth=1)
+# Backwards-compatible public API — submodules hold implementation.
+from .config import (
+    DEFAULT_AGENT_TYPE,
+    HEARTBEAT_PERIOD,
+    HEARTBEAT_TIMEOUT,
+    INIT_MAX_RETRIES,
+    INIT_RECENT_THRESHOLD_S,
+    INTER_DDS_WRITE_SLEEP_S,
+    LOCATION_PERIOD,
+    PARTICIPANT_LEASE_DURATION_MS,
+    POSITION_INIT_RECENT_THRESHOLD_S,
 )
-
-best_effort_qos = Qos(
-    Policy.Reliability.BestEffort,
-    Policy.Durability.Volatile,
-    Policy.Liveliness.ManualByParticipant(lease_duration=duration(milliseconds=30000))
+from .messages import (
+    DataMessage,
+    EntryExit,
+    Heartbeat,
+    ImageMessage,
+    Initialization,
+    Location,
+    MSG_DETECTED_OBJECT,
+    MSG_FACE_ENCODING,
+    MSG_GLOBAL_OBSERVE_START,
+    MSG_GOAL,
+    MSG_INVALID_GOAL,
+    MSG_LLM_DETECTED_OBJECT,
+    MSG_MAP_UPDATE,
+    MSG_MULTI_ROBOT_GOAL,
+    MSG_PATH,
+    MSG_PERSON_DETECTED,
+    MSG_POSITION_INIT,
+    MSG_SEND_UNKNOWN_IMAGES,
+    MSG_SENSOR_DETECTED_OBJECTS,
+    MSG_STAR_ENCODER_STATE,
+    MSG_STAR_GRU_OUT_EGO,
+    make_data_message,
 )
+from .network import get_local_ip, get_robot_id, hash_robot_id, make_participant_qos
+from .qos import best_effort_qos, reliable_qos
+from .topics import (
+    ENTRY_EXIT_TOPIC,
+    HEARTBEAT_TOPIC,
+    INITIALIZATION_TOPIC,
+    ROS_TOPIC_AGENTS_TO_SUBSCRIBE,
+    ROS_TOPIC_ENTRY_AGENTS,
+    ROS_TOPIC_EXITED_AGENTS,
+    ROS_TOPIC_HEARTBEAT_AGENTS,
+    ROS_TOPIC_MAP,
+    ROS_TOPIC_MAP_METADATA,
+    ROS_TOPIC_MAP_MOD,
+    ROS_TOPIC_TRANSFORMATION_MATRIX,
+    ROS_TOPIC_TRANSFORMATION_MATRIX_ABS,
+    data_topic_name,
+    image_topic_name,
+    location_topic_name,
+)
+from .transform import TransformMixin, pack_transform_msg, parse_transform_msg, transform_point, transform_points
+
+__all__ = [
+    "DEFAULT_AGENT_TYPE",
+    "HEARTBEAT_PERIOD",
+    "HEARTBEAT_TIMEOUT",
+    "INIT_MAX_RETRIES",
+    "INIT_RECENT_THRESHOLD_S",
+    "INTER_DDS_WRITE_SLEEP_S",
+    "LOCATION_PERIOD",
+    "PARTICIPANT_LEASE_DURATION_MS",
+    "POSITION_INIT_RECENT_THRESHOLD_S",
+    "DataMessage",
+    "EntryExit",
+    "Heartbeat",
+    "ImageMessage",
+    "Initialization",
+    "Location",
+    "MSG_DETECTED_OBJECT",
+    "MSG_FACE_ENCODING",
+    "MSG_GLOBAL_OBSERVE_START",
+    "MSG_GOAL",
+    "MSG_INVALID_GOAL",
+    "MSG_LLM_DETECTED_OBJECT",
+    "MSG_MAP_UPDATE",
+    "MSG_MULTI_ROBOT_GOAL",
+    "MSG_PATH",
+    "MSG_PERSON_DETECTED",
+    "MSG_POSITION_INIT",
+    "MSG_SEND_UNKNOWN_IMAGES",
+    "MSG_SENSOR_DETECTED_OBJECTS",
+    "MSG_STAR_ENCODER_STATE",
+    "MSG_STAR_GRU_OUT_EGO",
+    "make_data_message",
+    "get_local_ip",
+    "get_robot_id",
+    "hash_robot_id",
+    "make_participant_qos",
+    "best_effort_qos",
+    "reliable_qos",
+    "ENTRY_EXIT_TOPIC",
+    "HEARTBEAT_TOPIC",
+    "INITIALIZATION_TOPIC",
+    "ROS_TOPIC_AGENTS_TO_SUBSCRIBE",
+    "ROS_TOPIC_ENTRY_AGENTS",
+    "ROS_TOPIC_EXITED_AGENTS",
+    "ROS_TOPIC_HEARTBEAT_AGENTS",
+    "ROS_TOPIC_MAP",
+    "ROS_TOPIC_MAP_METADATA",
+    "ROS_TOPIC_MAP_MOD",
+    "ROS_TOPIC_TRANSFORMATION_MATRIX",
+    "ROS_TOPIC_TRANSFORMATION_MATRIX_ABS",
+    "data_topic_name",
+    "image_topic_name",
+    "location_topic_name",
+    "TransformMixin",
+    "pack_transform_msg",
+    "parse_transform_msg",
+    "transform_point",
+    "transform_points",
+]

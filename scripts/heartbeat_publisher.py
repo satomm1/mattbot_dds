@@ -2,79 +2,45 @@ import rospy
 from std_msgs.msg import Float64MultiArray
 import tf
 
-from cyclonedds.domain import DomainParticipant, DomainParticipantQos
+from cyclonedds.domain import DomainParticipant
 from cyclonedds.topic import Topic
-from cyclonedds.sub import Subscriber, DataReader
 from cyclonedds.pub import Publisher, DataWriter
-from cyclonedds.util import duration
-from cyclonedds.idl import IdlStruct
-from cyclonedds.idl.types import sequence
-from cyclonedds.core import Qos, Policy, Listener
-from cyclonedds.builtin import BuiltinDataReader, BuiltinTopicDcpsParticipant
-
 import time
 import os
-import numpy as np
-import socket
 
-from dds_utils import Heartbeat, best_effort_qos
+from dds_utils import (
+    DEFAULT_AGENT_TYPE,
+    HEARTBEAT_PERIOD,
+    HEARTBEAT_TOPIC,
+    Heartbeat,
+    ROS_TOPIC_TRANSFORMATION_MATRIX_ABS,
+    TransformMixin,
+    best_effort_qos,
+    get_local_ip,
+)
 
-HEARTBEAT_PERIOD = 10    # seconds
-HEARTBEAT_TIMEOUT = 31  # seconds
-AGENT_TYPE = "robot"
 
-class HeartbeatPublisher:
+class HeartbeatPublisher(TransformMixin):
     def __init__(self):
-        rospy.init_node('dds_heartbeat_publisher', anonymous=True)
+        rospy.init_node("dds_heartbeat_publisher", anonymous=True)
+
+        self.init_transform_state()
 
         # Get robot ID, Hash, and IP Address
-        self.my_id = os.environ.get('ROBOT_ID')
+        self.my_id = os.environ.get("ROBOT_ID")
 
-        # Get IP Address
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        # This doesn't have to be reachable; it just has to be a valid address
-        s.connect(("8.8.8.8", 80))
-        self.my_ip = s.getsockname()[0]
-        s.close()
-
-        self.lease_duration_ms = 30000
-        qos_profile = DomainParticipantQos()
-        qos_profile.lease_duration = duration(milliseconds=self.lease_duration_ms)
+        self.my_ip = get_local_ip()
 
         # Create a DomainParticipant, Subscriber, and Publisher
         self.participant = DomainParticipant()
         self.publisher = Publisher(self.participant)
 
-        self.heartbeat_topic = Topic(self.participant, 'HeartbeatTopic', Heartbeat)
+        self.heartbeat_topic = Topic(self.participant, HEARTBEAT_TOPIC, Heartbeat)
         self.heartbeat_writer = DataWriter(self.publisher, self.heartbeat_topic, qos=best_effort_qos)
 
         self.trans_listener = tf.TransformListener()
 
-        self.R = None
-        self.t = None
-        transformation_subscriber = rospy.Subscriber('/transformation_matrix', Float64MultiArray, self.transformation_callback)
-
-    def transformation_callback(self, data):
-        # Get the transformation matrix
-        transformation_matrix = data.data
-
-        # Reshape the transformation matrix
-        self.R = np.array(transformation_matrix[:4]).reshape(2, 2)
-        self.t = np.array(transformation_matrix[4:])
-
-    def transform_point(self, point, forward=True):
-        if self.R is None:
-            return point
-
-        point_xy = np.array([point[0], point[1]])
-        if forward:
-            new_point_xy = self.R @ point_xy + self.t
-            new_point_theta = point[2] + np.arctan2(self.R[1, 0], self.R[0, 0])
-            return np.concatenate((new_point_xy, [new_point_theta]))
-        else:
-            new_point_xy = self.R.T @ (point_xy - self.t)
-            new_point_theta = point[2] - np.arctan2(self.R[1, 0], self.R[0, 0])
-            return np.concatenate((new_point_xy, [new_point_theta]))
+        rospy.Subscriber(ROS_TOPIC_TRANSFORMATION_MATRIX_ABS, Float64MultiArray, self.transformation_callback)
 
     def run(self):
         while not rospy.is_shutdown():
@@ -101,7 +67,9 @@ class HeartbeatPublisher:
                 location_valid = False
 
             # Create a heartbeat message
-            heartbeat = Heartbeat(int(self.my_id), int(time.time()), AGENT_TYPE, self.my_ip, location_valid, x, y, theta, [])
+            heartbeat = Heartbeat(
+                int(self.my_id), int(time.time()), DEFAULT_AGENT_TYPE, self.my_ip, location_valid, x, y, theta, []
+            )
 
             # Publish the heartbeat message
             self.heartbeat_writer.write(heartbeat)
@@ -113,7 +81,8 @@ class HeartbeatPublisher:
     def shutdown(self):
         rospy.loginfo("Shutting down DDS heartbeat publisher...")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     heartbeat_publisher = HeartbeatPublisher()
     time.sleep(11)
     rospy.on_shutdown(heartbeat_publisher.shutdown)

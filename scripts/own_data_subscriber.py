@@ -1,20 +1,13 @@
 import rospy
-from rospy_message_converter import message_converter
 import tf
-import rospkg
-from mattbot_image_detection.msg import DetectedObject
-from geometry_msgs.msg import Pose, Pose2D, PoseWithCovarianceStamped
+from geometry_msgs.msg import Pose2D, PoseWithCovarianceStamped
 from std_msgs.msg import Float64MultiArray, UInt32
 
-from cyclonedds.domain import DomainParticipant, DomainParticipantQos
+from cyclonedds.domain import DomainParticipant
 from cyclonedds.topic import Topic
 from cyclonedds.sub import Subscriber, DataReader
-from cyclonedds.pub import Publisher, DataWriter
-from cyclonedds.util import duration
-from cyclonedds.idl import IdlStruct
-from cyclonedds.idl.types import sequence
-from cyclonedds.core import Qos, Policy, Listener
-from cyclonedds.builtin import BuiltinDataReader, BuiltinTopicDcpsParticipant
+from cyclonedds.pub import Publisher
+from cyclonedds.core import Listener
 
 from database_utils import RobotDatabase
 
@@ -23,7 +16,19 @@ import os
 import json
 import numpy as np
 
-from dds_utils import DataMessage, reliable_qos, MSG_MULTI_ROBOT_GOAL
+from dds_utils import (
+    MSG_GOAL,
+    MSG_MULTI_ROBOT_GOAL,
+    MSG_POSITION_INIT,
+    MSG_SEND_UNKNOWN_IMAGES,
+    DataMessage,
+    POSITION_INIT_RECENT_THRESHOLD_S,
+    ROS_TOPIC_TRANSFORMATION_MATRIX,
+    TransformMixin,
+    data_topic_name,
+    parse_transform_msg,
+    reliable_qos,
+)
 from mattbot_dds.msg import MultiRobotExternalGoal
 
 ##################################################
@@ -31,13 +36,14 @@ from mattbot_dds.msg import MultiRobotExternalGoal
 ##################################################
 
 
-class SelfDataListener(Listener):
+class SelfDataListener(Listener, TransformMixin):
 
     def __init__(self, my_id, topic_id, sqlite_db=None):
         super().__init__()
+        self.init_transform_state()
         self.my_id = my_id
         self.topic_id = topic_id
-        self.goal_pub = rospy.Publisher('/external_goal', Pose2D, queue_size=10)
+        self.goal_pub = rospy.Publisher("/external_goal", Pose2D, queue_size=10)
         self._external_goal_multi_topic = rospy.get_param(
             "~external_goal_multi_ros_topic", "/external_goal_multi"
         ).strip() or "/external_goal_multi"
@@ -47,20 +53,17 @@ class SelfDataListener(Listener):
         self.goal_multi_pub = rospy.Publisher(
             self._external_goal_multi_topic, MultiRobotExternalGoal, queue_size=10, latch=False
         )
-        self.send_unknown_images_pub = rospy.Publisher('/send_unknown_images', UInt32, queue_size=10)
-        self.init_pub = rospy.Publisher('/initialpose', PoseWithCovarianceStamped, queue_size=10)
+        self.send_unknown_images_pub = rospy.Publisher("/send_unknown_images", UInt32, queue_size=10)
+        self.init_pub = rospy.Publisher("/initialpose", PoseWithCovarianceStamped, queue_size=10)
 
         # Database connection
         self.db = sqlite_db
-
-        self.R = None
-        self.t = None
 
         print("Created listener for topic", topic_id)
 
     def on_data_available(self, reader):
         for sample in reader.read():
-            
+
             sending_agent = sample.sending_agent
             if sending_agent == int(self.my_id):
                 # Ignore messages from me
@@ -73,10 +76,10 @@ class SelfDataListener(Listener):
             print("Received message from agent", sending_agent, "of type", message_type)
 
             # Process the message
-            if message_type == "goal":
+            if message_type == MSG_GOAL:
 
                 # Transform the goal point to this occupancy grid
-                x, y, theta = self.transform_point([data['x'], data['y'], data['theta']], forward=False)
+                x, y, theta = self.transform_point([data["x"], data["y"], data["theta"]], forward=False)
 
                 print(f"Received goal message from agent {sending_agent}: x={x}, y={y}, theta={theta}")
                 goal_msg = Pose2D()
@@ -90,7 +93,7 @@ class SelfDataListener(Listener):
 
             elif message_type == MSG_MULTI_ROBOT_GOAL:
 
-                x, y, theta = self.transform_point([data['x'], data['y'], data['theta']], forward=False)
+                x, y, theta = self.transform_point([data["x"], data["y"], data["theta"]], forward=False)
                 plan_id = data.get("plan_id", "")
                 coordinated = bool(data.get("coordinated", True))
                 target_agent = int(data.get("target_agent", int(self.my_id)))
@@ -120,14 +123,14 @@ class SelfDataListener(Listener):
                     self.goal_pub.publish(g)
                 if self.db is not None:
                     self.db.add_goal(self.my_id, x, y, theta, timestamp)
-            elif message_type == "position_init":
+            elif message_type == MSG_POSITION_INIT:
                 # Transform the position to this occupancy grid
-                x, y, theta = self.transform_point([data['x'], data['y'], data['theta']], forward=False)
+                x, y, theta = self.transform_point([data["x"], data["y"], data["theta"]], forward=False)
 
                 # Check that timestamp is recent
                 current_time = rospy.Time.now()
                 message_time = rospy.Time.from_sec(timestamp)
-                if (current_time - message_time).to_sec() > 5.0:
+                if (current_time - message_time).to_sec() > POSITION_INIT_RECENT_THRESHOLD_S:
                     continue
 
                 print(f"Received position_init message from agent {sending_agent}: x={x}, y={y}, theta={theta}")
@@ -146,47 +149,31 @@ class SelfDataListener(Listener):
                 covariance = np.zeros((6, 6))
                 covariance[0, 0] = 0.25  # Variance in x
                 covariance[1, 1] = 0.25  # Variance in y
-                covariance[5, 5] = 6.28   # Variance in theta
+                covariance[5, 5] = 6.28  # Variance in theta
                 init_msg.pose.covariance = covariance.flatten().tolist()
-                
+
                 self.init_pub.publish(init_msg)
-            elif message_type == "send_unknown_images":
+            elif message_type == MSG_SEND_UNKNOWN_IMAGES:
                 # Publish to topic to let the image detection node know to send unknown images
                 # We need to send the agent id to which the images should be sent
                 msg = UInt32()
                 msg.data = sending_agent
                 self.send_unknown_images_pub.publish(msg)
-    
-    def update_transformation_matrix(self, R, t):   
-        
-        self.R = R
-        self.t = t
 
-    def transform_point(self, point, forward=True):
-        if self.R is None:
-            return point
 
-        point_xy = np.array([point[0], point[1]])
-        if forward:
-            new_point_xy = self.R @ point_xy + self.t
-            new_point_theta = point[2] + np.arctan2(self.R[1, 0], self.R[0, 0])
-            return np.concatenate((new_point_xy, [new_point_theta]))
-        else:
-            new_point_xy = self.R.T @ (point_xy - self.t)
-            new_point_theta = point[2] - np.arctan2(self.R[1, 0], self.R[0, 0])
-            return np.concatenate((new_point_xy, [new_point_theta]))
-
-class OwnDataSubscriber:
+class OwnDataSubscriber(TransformMixin):
 
     def __init__(self):
-        
-        rospy.init_node('dds_own_data_subscriber', anonymous=True)
+
+        rospy.init_node("dds_own_data_subscriber", anonymous=True)
+
+        self.init_transform_state()
 
         # Get robot ID, Hash, and IP Address
-        self.my_id = os.environ.get('ROBOT_ID')
+        self.my_id = os.environ.get("ROBOT_ID")
 
         # Get sqlite parameter
-        self.sqlite = rospy.get_param('~sqlite', False)
+        self.sqlite = rospy.get_param("~sqlite", False)
         self.db = None
         if self.sqlite:
             self.db = RobotDatabase()
@@ -198,24 +185,18 @@ class OwnDataSubscriber:
         self.publisher = Publisher(self.participant)
 
         # Create my data topic
-        self.data_topic = Topic(self.participant, 'DataTopic' + str(self.my_id), DataMessage)
+        self.data_topic = Topic(self.participant, data_topic_name(self.my_id), DataMessage)
         self.data_listener = SelfDataListener(self.my_id, self.my_id, sqlite_db=self.db)
         self.data_reader = DataReader(self.subscriber, self.data_topic, listener=self.data_listener, qos=reliable_qos)
 
-        self.R = None
-        self.t = None
-        transformation_subscriber = rospy.Subscriber('/transformation_matrix', Float64MultiArray, self.transformation_callback)
+        rospy.Subscriber(ROS_TOPIC_TRANSFORMATION_MATRIX, Float64MultiArray, self.transformation_callback)
 
     def transformation_callback(self, data):
 
         # Get the transformation matrix
-        transformation_matrix = data.data
+        self.R, self.t = parse_transform_msg(data)
 
-        # Reshape the transformation matrix
-        self.R = np.array(transformation_matrix[:4]).reshape(2, 2)
-        self.t = np.array(transformation_matrix[4:])
-
-        self.data_listener.update_transformation_matrix(self.R, self.t)
+        self.data_listener.update_transformation(self.R, self.t)
 
     def run(self):
         while not rospy.is_shutdown():
@@ -225,7 +206,7 @@ class OwnDataSubscriber:
         print("Shutting down DDS Own Data Subscriber")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     own_data_subscriber = OwnDataSubscriber()
     rospy.on_shutdown(own_data_subscriber.shutdown)
     own_data_subscriber.run()

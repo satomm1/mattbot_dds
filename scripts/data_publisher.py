@@ -1,75 +1,84 @@
 import rospy
 from rospy_message_converter import message_converter
-import tf
-import rospkg
 from mattbot_image_detection.msg import DetectedObject, DetectedObjectArray
 from mattbot_image_detection.msg import LabeledObject, LabeledObjectArray
-from sensor_msgs.msg import Image
-from mattbot_dds.msg import AgentSubscription, AgentPath, AgentLocation
 from mattbot_dds.msg import MultiRobotGoalPlan, MultiRobotExternalGoal
 from nav_msgs.msg import Path
-from geometry_msgs.msg import Pose, Pose2D
-from std_msgs.msg import Float32MultiArray, Float64MultiArray, Int16MultiArray, Time as RosTimeMsg
+from geometry_msgs.msg import Pose2D
+from std_msgs.msg import Float32MultiArray, Float64MultiArray, Time as RosTimeMsg
 from mattbot_image_detection.msg import FaceEncoding
 
-from cyclonedds.domain import DomainParticipant, DomainParticipantQos
+from cyclonedds.domain import DomainParticipant
 from cyclonedds.topic import Topic
-from cyclonedds.sub import Subscriber, DataReader
 from cyclonedds.pub import Publisher, DataWriter
-from cyclonedds.util import duration
-from cyclonedds.idl import IdlStruct
-from cyclonedds.idl.types import sequence
-from cyclonedds.core import Qos, Policy, Listener
-from cyclonedds.builtin import BuiltinDataReader, BuiltinTopicDcpsParticipant
 
 from database_utils import RobotDatabase
 
 import time
 import os
-import hashlib
-import socket
 import json
-import requests
 import numpy as np
 
-from dds_utils import DataMessage, reliable_qos, MSG_GLOBAL_OBSERVE_START, MSG_MULTI_ROBOT_GOAL
+from dds_utils import (
+    INTER_DDS_WRITE_SLEEP_S,
+    MSG_DETECTED_OBJECT,
+    MSG_FACE_ENCODING,
+    MSG_GLOBAL_OBSERVE_START,
+    MSG_GOAL,
+    MSG_INVALID_GOAL,
+    MSG_LLM_DETECTED_OBJECT,
+    MSG_MULTI_ROBOT_GOAL,
+    MSG_PATH,
+    MSG_PERSON_DETECTED,
+    MSG_STAR_ENCODER_STATE,
+    MSG_STAR_GRU_OUT_EGO,
+    DataMessage,
+    ROS_TOPIC_TRANSFORMATION_MATRIX,
+    TransformMixin,
+    data_topic_name,
+    make_data_message,
+    make_participant_qos,
+    reliable_qos,
+)
 
-class DataPublisher:
 
+class DataPublisher(TransformMixin):
     def __init__(self):
-        rospy.init_node('dds_data_publisher', anonymous=True)
+        rospy.init_node("dds_data_publisher", anonymous=True)
 
-        self.my_id = os.environ.get('ROBOT_ID')
+        self.init_transform_state()
+
+        self.my_id = os.environ.get("ROBOT_ID")
+        try:
+            self.my_id_int = int(self.my_id) if self.my_id is not None else None
+        except (TypeError, ValueError):
+            self.my_id_int = None
 
         # Get sqlite parameter
-        self.sqlite = rospy.get_param('~sqlite', False)
+        self.sqlite = rospy.get_param("~sqlite", False)
         self.db = None
         if self.sqlite:
             self.db = RobotDatabase()
 
-        self.lease_duration_ms = 30000
-        qos_profile = DomainParticipantQos()
-        qos_profile.lease_duration = duration(milliseconds=self.lease_duration_ms)
+        qos_profile = make_participant_qos()
 
         # Create a DomainParticipant, Subscriber, and Publisher
         self.participant = DomainParticipant(qos=qos_profile)
         self.publisher = Publisher(self.participant)
 
         # Create my data topic
-        self.data_topic = Topic(self.participant, 'DataTopic' + str(self.my_id), DataMessage)
+        self.data_topic = Topic(self.participant, data_topic_name(self.my_id), DataMessage)
         self.data_writer = DataWriter(self.publisher, self.data_topic, qos=reliable_qos)
 
-        self.R = None
-        self.t = None
-        transformation_subscriber = rospy.Subscriber('transformation_matrix', Float64MultiArray, self.transformation_callback)
+        rospy.Subscriber(ROS_TOPIC_TRANSFORMATION_MATRIX, Float64MultiArray, self.transformation_callback)
 
-        self.object_subscriber = rospy.Subscriber('/confirmed_objects', DetectedObject, self.confirmed_object_callback, queue_size=10)
-        self.path_subscriber = rospy.Subscriber('/cmd_smoothed_path', Path, self.path_callback, queue_size=10)
-        self.voice_goal_subscriber = rospy.Subscriber('/voice_goal', Pose2D, self.voice_goal_callback, queue_size=10)
-        self.new_face_encoding_subscriber = rospy.Subscriber('/new_face_encoding', FaceEncoding, self.face_encoding_callback, queue_size=10)
-        self.llm_image_subscriber = rospy.Subscriber('/labeled_unknown_objects', LabeledObjectArray, self.labeled_callback, queue_size=3)
-        self.invalid_goal_subscriber = rospy.Subscriber('/invalid_goal', Pose2D, self.invalid_goal_callback, queue_size=10)
-        self.detected_object_subscriber = rospy.Subscriber('/detected_objects', DetectedObjectArray, self.detected_object_callback, queue_size=10)
+        self.object_subscriber = rospy.Subscriber("/confirmed_objects", DetectedObject, self.confirmed_object_callback, queue_size=10)
+        self.path_subscriber = rospy.Subscriber("/cmd_smoothed_path", Path, self.path_callback, queue_size=10)
+        self.voice_goal_subscriber = rospy.Subscriber("/voice_goal", Pose2D, self.voice_goal_callback, queue_size=10)
+        self.new_face_encoding_subscriber = rospy.Subscriber("/new_face_encoding", FaceEncoding, self.face_encoding_callback, queue_size=10)
+        self.llm_image_subscriber = rospy.Subscriber("/labeled_unknown_objects", LabeledObjectArray, self.labeled_callback, queue_size=3)
+        self.invalid_goal_subscriber = rospy.Subscriber("/invalid_goal", Pose2D, self.invalid_goal_callback, queue_size=10)
+        self.detected_object_subscriber = rospy.Subscriber("/detected_objects", DetectedObjectArray, self.detected_object_callback, queue_size=10)
 
         self._star_enc_topic = rospy.get_param("~star_encoder_ros_topic", "").strip()
         self._star_gru_topic = rospy.get_param("~star_gru_out_ego_ros_topic", "").strip()
@@ -134,22 +143,33 @@ class DataPublisher:
             self._external_goal_multi_topic,
         )
 
+    def _sender_id_optional(self):
+        """Matches prior uses: int(my_id) if set else 0."""
+        return self.my_id_int if self.my_id_int is not None else 0
+
+    def _sender_id_strict(self):
+        """Matches prior uses: int(self.my_id) for object/goal paths."""
+        return int(self.my_id)
+
+    def _publish_data(self, message_type, payload, *, sleep=True, sending_agent=None):
+        aid = self._sender_id_strict() if sending_agent is None else sending_agent
+        self.data_writer.write(make_data_message(message_type, aid, payload))
+        if sleep:
+            time.sleep(INTER_DDS_WRITE_SLEEP_S)
+
     def _get_writer_for_target(self, agent_id):
         """Reliable DataWriter on DataTopic{agent_id}, cached per target."""
         if agent_id in self._target_data_writers:
             return self._target_data_writers[agent_id]
-        topic = Topic(self.participant, "DataTopic" + str(agent_id), DataMessage)
+        topic = Topic(self.participant, data_topic_name(agent_id), DataMessage)
         writer = DataWriter(self.publisher, topic, qos=reliable_qos)
         self._target_data_writers[agent_id] = writer
         return writer
 
     def multi_robot_goal_plan_callback(self, msg):
         """Fan out fleet goals to each peer's DataTopic; orchestrator's own id uses local ROS only."""
-        try:
-            my_id_int = int(self.my_id) if self.my_id is not None else None
-        except (TypeError, ValueError):
-            my_id_int = None
-        aid_sender = my_id_int if my_id_int is not None else 0
+        my_id_int = self.my_id_int
+        aid_sender = self._sender_id_optional()
 
         for entry in msg.goals:
             rid = int(entry.robot_id)
@@ -185,12 +205,7 @@ class DataPublisher:
                 "coordinated": bool(coordinated),
                 "target_agent": rid,
             }
-            dm = DataMessage(
-                message_type=MSG_MULTI_ROBOT_GOAL,
-                sending_agent=aid_sender,
-                timestamp=int(time.time()),
-                data=json.dumps(payload),
-            )
+            dm = make_data_message(MSG_MULTI_ROBOT_GOAL, aid_sender, payload)
             writer = self._get_writer_for_target(rid)
             writer.write(dm)
             rospy.loginfo(
@@ -199,72 +214,38 @@ class DataPublisher:
                 rid,
                 plan_id,
             )
-            time.sleep(0.01)
+            time.sleep(INTER_DDS_WRITE_SLEEP_S)
 
     def _global_observe_start_callback(self, msg: RosTimeMsg):
-        aid = int(self.my_id) if self.my_id is not None else 0
-        dm = DataMessage(
-            message_type=MSG_GLOBAL_OBSERVE_START,
-            sending_agent=aid,
-            timestamp=int(time.time()),
-            data=json.dumps({"sec": int(msg.data.secs), "nsec": int(msg.data.nsecs)}),
+        aid = self._sender_id_optional()
+        self.data_writer.write(
+            make_data_message(
+                MSG_GLOBAL_OBSERVE_START,
+                aid,
+                {"sec": int(msg.data.secs), "nsec": int(msg.data.nsecs)},
+            )
         )
-        self.data_writer.write(dm)
 
     def _star_encoder_callback(self, msg: Float32MultiArray):
-        aid = int(self.my_id) if self.my_id is not None else 0
-        dm = DataMessage(
-            message_type="star_encoder_state",
-            sending_agent=aid,
-            timestamp=int(time.time()),
-            data=json.dumps({"v": [float(x) for x in msg.data]}),
-        )
-        self.data_writer.write(dm)
+        aid = self._sender_id_optional()
+        self._publish_data(MSG_STAR_ENCODER_STATE, {"v": [float(x) for x in msg.data]}, sleep=True, sending_agent=aid)
 
     def _star_gru_out_ego_callback(self, msg: Float32MultiArray):
-        aid = int(self.my_id) if self.my_id is not None else 0
-        dm = DataMessage(
-            message_type="star_gru_out_ego",
-            sending_agent=aid,
-            timestamp=int(time.time()),
-            data=json.dumps({"v": [float(x) for x in msg.data]}),
-        )
-        self.data_writer.write(dm)
-
-    def transformation_callback(self, data):
-        # Get the transformation matrix
-        transformation_matrix = data.data
-
-        # Reshape the transformation matrix
-        self.R = np.array(transformation_matrix[:4]).reshape(2, 2)
-        self.t = np.array(transformation_matrix[4:])
-
-    def transform_point(self, point, forward=True):
-        if self.R is None:
-            return point
-
-        point_xy = np.array([point[0], point[1]])
-        if forward:
-            new_point_xy = self.R @ point_xy + self.t
-            new_point_theta = point[2] + np.arctan2(self.R[1, 0], self.R[0, 0])
-            return np.concatenate((new_point_xy, [new_point_theta]))
-        else:
-            new_point_xy = self.R.T @ (point_xy - self.t)
-            new_point_theta = point[2] - np.arctan2(self.R[1, 0], self.R[0, 0])
-            return np.concatenate((new_point_xy, [new_point_theta]))
+        aid = self._sender_id_optional()
+        self._publish_data(MSG_STAR_GRU_OUT_EGO, {"v": [float(x) for x in msg.data]}, sleep=True, sending_agent=aid)
 
     def transform_points(self, points, forward=True):
         if self.R is None:
             return points
 
-        points_xy = np.array([points[0,:], points[1,:]])
+        points_xy = np.array([points[0, :], points[1, :]])
         if forward:
             new_point_xy = self.R @ points_xy + self.t
-            new_point_theta = points[2,:] + np.arctan2(self.R[1, 0], self.R[0, 0])
+            new_point_theta = points[2, :] + np.arctan2(self.R[1, 0], self.R[0, 0])
             return np.concatenate((new_point_xy, new_point_theta))
         else:
             new_point_xy = self.R.T @ (points_xy - self.t)
-            new_point_theta = points[2,:] - np.arctan2(self.R[1, 0], self.R[0, 0])
+            new_point_theta = points[2, :] - np.arctan2(self.R[1, 0], self.R[0, 0])
             return np.concatenate((new_point_xy, [new_point_theta]))
 
     def confirmed_object_callback(self, msg):
@@ -276,14 +257,10 @@ class DataPublisher:
         msg.pose.position.x = new_point[0]
         msg.pose.position.y = new_point[1]
 
-        object_message = DataMessage(
-            message_type="detected_object",
-            sending_agent=int(self.my_id),
-            timestamp=int(time.time()),
-            data=json.dumps(message_converter.convert_ros_message_to_dictionary(msg))
+        self._publish_data(
+            MSG_DETECTED_OBJECT,
+            message_converter.convert_ros_message_to_dictionary(msg),
         )
-        self.data_writer.write(object_message)
-        time.sleep(0.01)
 
         if self.db is not None:
             # Save the object to the SQLite database
@@ -299,14 +276,10 @@ class DataPublisher:
             new_msg.pose.position.x = new_point[0]
             new_msg.pose.position.y = new_point[1]
 
-            object_message = DataMessage(
-                message_type="llm_detected_object",
-                sending_agent=int(self.my_id),
-                timestamp=int(time.time()),
-                data=json.dumps(message_converter.convert_ros_message_to_dictionary(new_msg))
+            self._publish_data(
+                MSG_LLM_DETECTED_OBJECT,
+                message_converter.convert_ros_message_to_dictionary(new_msg),
             )
-            self.data_writer.write(object_message)
-            time.sleep(0.01)
 
     def detected_object_callback(self, msg):
         for obj in msg.objects:
@@ -315,23 +288,19 @@ class DataPublisher:
                 x = obj.pose.position.x
                 y = obj.pose.position.y
                 new_point = self.transform_point([x, y, 0])
-                
+
                 new_msg = DetectedObject()
                 new_msg.class_name = class_name
                 new_msg.pose.position.x = new_point[0]
                 new_msg.pose.position.y = new_point[1]
 
-                object_message = DataMessage(
-                    message_type="person_detected",
-                    sending_agent=int(self.my_id),
-                    timestamp=int(time.time()),
-                    data=json.dumps(message_converter.convert_ros_message_to_dictionary(new_msg))
+                self._publish_data(
+                    MSG_PERSON_DETECTED,
+                    message_converter.convert_ros_message_to_dictionary(new_msg),
                 )
-                self.data_writer.write(object_message)
-                time.sleep(0.01)
 
     def path_callback(self, msg):
-        
+
         # First update the poses in msg to the new frame
         for i in range(len(msg.poses)):
             x = msg.poses[i].pose.position.x
@@ -340,14 +309,7 @@ class DataPublisher:
             msg.poses[i].pose.position.x = new_point[0]
             msg.poses[i].pose.position.y = new_point[1]
 
-        path_message = DataMessage(
-            message_type="path",
-            sending_agent=int(self.my_id),
-            timestamp=int(time.time()),
-            data=json.dumps(message_converter.convert_ros_message_to_dictionary(msg))
-        )
-        self.data_writer.write(path_message)
-        time.sleep(0.01)
+        self._publish_data(MSG_PATH, message_converter.convert_ros_message_to_dictionary(msg))
 
     def voice_goal_callback(self, msg):
         x = msg.x
@@ -358,14 +320,7 @@ class DataPublisher:
         msg.y = new_point[1]
         msg.theta = new_point[2]
 
-        goal_message = DataMessage(
-            message_type="goal",
-            sending_agent=int(self.my_id),
-            timestamp=int(time.time()),
-            data=json.dumps(message_converter.convert_ros_message_to_dictionary(msg))
-        )
-        self.data_writer.write(goal_message)
-        time.sleep(0.01)
+        self._publish_data(MSG_GOAL, message_converter.convert_ros_message_to_dictionary(msg))
 
     def face_encoding_callback(self, msg):
         # Convert the Float64MultiArray to a list
@@ -376,17 +331,7 @@ class DataPublisher:
         face_encoding = list(msg.encoding)
         name = msg.name
 
-        face_encoding_message = DataMessage(
-            message_type="face_encoding",
-            sending_agent=int(self.my_id),
-            timestamp=int(time.time()),
-            data=json.dumps({
-                "name": name,
-                "encoding": face_encoding
-            })
-        )
-        self.data_writer.write(face_encoding_message)
-        time.sleep(0.01)
+        self._publish_data(MSG_FACE_ENCODING, {"name": name, "encoding": face_encoding})
 
     def invalid_goal_callback(self, msg):
         x = msg.x
@@ -397,14 +342,7 @@ class DataPublisher:
         msg.y = new_point[1]
         msg.theta = new_point[2]
 
-        goal_message = DataMessage(
-            message_type="invalid_goal",
-            sending_agent=int(self.my_id),
-            timestamp=int(time.time()),
-            data=json.dumps(message_converter.convert_ros_message_to_dictionary(msg))
-        )
-        self.data_writer.write(goal_message)
-        time.sleep(0.01)
+        self._publish_data(MSG_INVALID_GOAL, message_converter.convert_ros_message_to_dictionary(msg))
 
     def run(self):
         while not rospy.is_shutdown():
@@ -414,8 +352,7 @@ class DataPublisher:
         print("Shutting down DDS data publisher")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     data_publisher = DataPublisher()
     rospy.on_shutdown(data_publisher.shutdown)
     data_publisher.run()
-    

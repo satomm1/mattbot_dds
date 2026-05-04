@@ -1,42 +1,71 @@
 import rospy
-from nav_msgs.msg import OccupancyGrid, MapMetaData, Path
-from mattbot_dds.msg import AgentLocationsArray
-from mattbot_dds.msg import AgentSubscription
-from geometry_msgs.msg import Pose, Pose2D
-from std_msgs.msg import Header, Int32, Float64MultiArray, Int16MultiArray
-from rospy_message_converter import message_converter
+from nav_msgs.msg import OccupancyGrid, MapMetaData
+from std_msgs.msg import Float64MultiArray, Int16MultiArray
 import tf
 import rospkg
 
-from cyclonedds.domain import DomainParticipant, DomainParticipantQos
+from cyclonedds.domain import DomainParticipant
 from cyclonedds.topic import Topic
 from cyclonedds.sub import Subscriber, DataReader
 from cyclonedds.pub import Publisher, DataWriter
-from cyclonedds.util import duration
-from cyclonedds.idl import IdlStruct
-from cyclonedds.idl.types import sequence
-from cyclonedds.core import Qos, Policy, Listener
-from cyclonedds.builtin import BuiltinDataReader, BuiltinTopicDcpsParticipant
+from cyclonedds.core import Listener
 
 import time
 import os
-import hashlib
-import socket
 import json
-import requests
 import numpy as np
 
-from dds_utils import EntryExit, Heartbeat, Initialization, Location, DataMessage, reliable_qos, best_effort_qos
+from dds_utils import (
+    DEFAULT_AGENT_TYPE,
+    ENTRY_EXIT_TOPIC,
+    HEARTBEAT_PERIOD,
+    INIT_MAX_RETRIES,
+    INIT_RECENT_THRESHOLD_S,
+    INITIALIZATION_TOPIC,
+    EntryExit,
+    Initialization,
+    ROS_TOPIC_AGENTS_TO_SUBSCRIBE,
+    ROS_TOPIC_ENTRY_AGENTS,
+    ROS_TOPIC_EXITED_AGENTS,
+    ROS_TOPIC_HEARTBEAT_AGENTS,
+    ROS_TOPIC_MAP,
+    ROS_TOPIC_MAP_METADATA,
+    ROS_TOPIC_MAP_MOD,
+    ROS_TOPIC_TRANSFORMATION_MATRIX,
+    TransformMixin,
+    get_local_ip,
+    hash_robot_id,
+    make_participant_qos,
+    pack_transform_msg,
+    reliable_qos,
+)
 
-# Constants (Set depending on the agent)
-HEARTBEAT_PERIOD = 10    # seconds
-HEARTBEAT_TIMEOUT = 31  # seconds
-LOCATION_FREQUENCY = 1  # Hz
-AGENT_CAPABILITIES = ['camera', 'lidar']
-AGENT_MESSAGE_TYPES = ['object_detection', 'object_tracking']
-AGENT_TYPE = 'robot'
-DISTANCE_THRESHOLD = 5.0
-SENSOR_AGENT_START = 200  # The id of agents which are sensor's only
+
+def _occupancy_grid_from_map_dict(map_data):
+    """Build OccupancyGrid from mattbot_mcl current_map-style JSON map dict."""
+    grid = OccupancyGrid()
+    grid.header.frame_id = "map"
+    grid.info.width = map_data.get("width")
+    grid.info.height = map_data.get("height")
+    grid.info.resolution = map_data.get("resolution")
+    grid.info.origin.position.x = map_data.get("origin_x")
+    grid.info.origin.position.y = map_data.get("origin_y")
+    grid.info.origin.position.z = map_data.get("origin_z")
+    grid.info.origin.orientation.x = map_data.get("origin_orientation_x")
+    grid.info.origin.orientation.y = map_data.get("origin_orientation_y")
+    grid.info.origin.orientation.z = map_data.get("origin_orientation_z")
+    grid.info.origin.orientation.w = map_data.get("origin_orientation_w")
+    grid.data = map_data.get("occupancy")
+    return grid
+
+
+def _read_known_points(path):
+    known_points = []
+    with open(path, "r") as f:
+        for line in f:
+            x, y = line.split(",")
+            known_points.append((float(x), float(y)))
+    return known_points
 
 
 class EntryExitListener(Listener):
@@ -76,10 +105,10 @@ class EntryExitListener(Listener):
         self.agents = dict()
         self.exited_agents = dict()
         self.agents[my_hash] = {
-            'agent_type': AGENT_TYPE,
-            'ip_address': my_ip,
-            'hash': my_hash
-        }  
+            "agent_type": DEFAULT_AGENT_TYPE,
+            "ip_address": my_ip,
+            "hash": my_hash,
+        }
 
         self.my_id = my_id
         self.my_ip = my_ip
@@ -109,35 +138,40 @@ class EntryExitListener(Listener):
                 continue
 
             # Determine if entry or exit message
-            if sample.action == 'enter':
-                new_robot_hash = hash_func(str(sample.agent_id))
+            if sample.action == "enter":
+                new_robot_hash = hash_robot_id(str(sample.agent_id))
                 # If the new agent is the closest robot, send an initialization message
                 # The initalization message contains the map, map metadata, and all agents in the environment
                 if self.find_if_closest_robot(new_robot_hash):
-                    print(f'Agent {sample.agent_id} of type \'{sample.agent_type}\' is requesting entry')
+                    print(f"Agent {sample.agent_id} of type '{sample.agent_type}' is requesting entry")
 
                     # Message containing details of all active agents
                     agents_message = json.dumps(self.agents)
 
                     known_points_json = json.dumps(self.known_points)
 
-                    init_message = Initialization(target_agent=sample.agent_id, sending_agent=int(self.my_id), agents=agents_message, known_points=known_points_json)
+                    init_message = Initialization(
+                        target_agent=sample.agent_id,
+                        sending_agent=int(self.my_id),
+                        agents=agents_message,
+                        known_points=known_points_json,
+                    )
                     self.init_writer.write(init_message)
 
                     # print(f'Sent initialization message to agent {sample.agent_id}')
-            elif sample.action == 'initialized':
-                
+            elif sample.action == "initialized":
+
                 # Only if the sample.timestamp is recent
-                if int(time.time()) - sample.timestamp < 10: 
-                    print(f'Agent {sample.agent_id} of type \'{sample.agent_type}\' entered the environment')
+                if int(time.time()) - sample.timestamp < INIT_RECENT_THRESHOLD_S:
+                    print(f"Agent {sample.agent_id} of type '{sample.agent_type}' entered the environment")
 
                     # Agent initialized, add to agents dictionary
-                    new_robot_hash = hash_func(str(sample.agent_id))
+                    new_robot_hash = hash_robot_id(str(sample.agent_id))
                     self.agents[sample.agent_id] = {
-                        'agent_type': sample.agent_type,
-                        'ip_address': sample.ip_address,
-                        'hash': new_robot_hash,
-                        'timestamp': sample.timestamp
+                        "agent_type": sample.agent_type,
+                        "ip_address": sample.ip_address,
+                        "hash": new_robot_hash,
+                        "timestamp": sample.timestamp,
                     }
 
                     # Remove from exited agents if it exists
@@ -145,17 +179,17 @@ class EntryExitListener(Listener):
                         self.exited_agents.pop(sample.agent_id)
 
                     self.update_to_agents = True
-            elif sample.action == 'exit':
+            elif sample.action == "exit":
                 # Agent Exited, remove from agents dictionary
                 if sample.agent_id in self.agents:
-                    print(f'Agent {sample.agent_id} exited the environment')
+                    print(f"Agent {sample.agent_id} exited the environment")
                     self.agents.pop(sample.agent_id)  # Pop from agents dictionary
                     self.exited_agents[sample.agent_id] = int(time.time())  # Add to exited agents dictionary
                     self.update_to_agents = True
 
     def find_if_closest_robot(self, robot_hash):
         """
-        Finds if the given robot is the closest robot to the current agent. 
+        Finds if the given robot is the closest robot to the current agent.
         The closest robot is the robot that has the smallest difference in hash value
 
         Parameters:
@@ -168,7 +202,7 @@ class EntryExitListener(Listener):
 
         # Loop through all agents to see if there is a closer robot (by hash)
         for agent_id, agent_info in self.agents.items():
-            agent_hash = agent_info['hash']
+            agent_hash = agent_info["hash"]
 
             distance = abs(agent_hash - robot_hash)
             if distance < my_distance and distance != 0:
@@ -186,7 +220,7 @@ class EntryExitListener(Listener):
         - bool: True if there are updates, False otherwise.
         """
         return self.update_to_agents
-    
+
     def get_agents(self):
         """
         Retrieves the active agents, exited agents, and lost agents.
@@ -266,7 +300,7 @@ class InitializationListener(Listener):
             if sending_agent == int(self.my_id):
                 continue
 
-            print(f'    Initialization message received from agent {sending_agent}')
+            print(f"    Initialization message received from agent {sending_agent}")
 
             # Ignore messages not intended for this agent
             if sample.target_agent != int(self.my_id):
@@ -279,11 +313,11 @@ class InitializationListener(Listener):
                 for agent_id, agent_info in agent_dict.items():
                     if agent_id != self.my_id:
                         self.agents[int(agent_id)] = {
-                            'agent_type': agent_info['agent_type'],
-                            'ip_address': agent_info['ip_address'],
-                            'hash': agent_info['hash'],
-                            'timestamp': agent_info['timestamp']
-                        }  
+                            "agent_type": agent_info["agent_type"],
+                            "ip_address": agent_info["ip_address"],
+                            "hash": agent_info["hash"],
+                            "timestamp": agent_info["timestamp"],
+                        }
 
             # Load the known points from the initialization message
             known_points = json.loads(sample.known_points)
@@ -337,37 +371,20 @@ class InitializationListener(Listener):
         """
         return self.agents
 
-def hash_func(robot_id):
-    """
-    Hashes the given robot ID using SHA-256 algorithm.
 
-    Parameters:
-    robot_id (str): The robot ID to be hashed.
-
-    Returns:
-    int: The hashed robot ID as an integer.
-
-    """
-    return int(hashlib.sha256(robot_id.encode()).hexdigest(), 16)
-
-
-class EntryExitCommunication:
-
+class EntryExitCommunication(TransformMixin):
     def __init__(self):
 
-        rospy.init_node('agent_entry_exit', anonymous=True)
+        rospy.init_node("agent_entry_exit", anonymous=True)
+
+        self.init_transform_state()
 
         # Get robot ID, Hash, and IP Address
-        self.my_id = os.environ.get('ROBOT_ID')
+        self.my_id = os.environ.get("ROBOT_ID")
         print(f"\nMy Agent ID is {self.my_id}")
-        self.my_hash = hash_func(self.my_id)
+        self.my_hash = hash_robot_id(self.my_id)
 
-        # Get IP Address
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        # This doesn't have to be reachable; it just has to be a valid address
-        s.connect(("8.8.8.8", 80))
-        self.my_ip = s.getsockname()[0]
-        s.close()
+        self.my_ip = get_local_ip()
         print(f"My IP address is {self.my_ip}")
 
         # Dictionary to store agents in the environment
@@ -377,13 +394,11 @@ class EntryExitCommunication:
         self.map_msg = OccupancyGrid()
         self.map_md_msg = MapMetaData()
 
-        self.map_publisher = rospy.Publisher('map', OccupancyGrid, queue_size=10)
-        self.map_mod_publisher = rospy.Publisher('map_mod', OccupancyGrid, queue_size=10)
-        self.map_md_publisher = rospy.Publisher('map_metadata', MapMetaData, queue_size=10)
+        self.map_publisher = rospy.Publisher(ROS_TOPIC_MAP, OccupancyGrid, queue_size=10)
+        self.map_mod_publisher = rospy.Publisher(ROS_TOPIC_MAP_MOD, OccupancyGrid, queue_size=10)
+        self.map_md_publisher = rospy.Publisher(ROS_TOPIC_MAP_METADATA, MapMetaData, queue_size=10)
 
-        self.lease_duration_ms = 30000
-        qos_profile = DomainParticipantQos()
-        qos_profile.lease_duration = duration(milliseconds=self.lease_duration_ms)
+        qos_profile = make_participant_qos()
 
         # Create a DomainParticipant, Subscriber, and Publisher
         self.participant = DomainParticipant(qos=qos_profile)
@@ -391,25 +406,27 @@ class EntryExitCommunication:
         self.publisher = Publisher(self.participant)
 
         # Create the topics needed
-        self.entry_exit_topic = Topic(self.participant, 'EntryExitTopic', EntryExit)
-        self.init_topic = Topic(self.participant, 'InitializationTopic', Initialization)
+        self.entry_exit_topic = Topic(self.participant, ENTRY_EXIT_TOPIC, EntryExit)
+        self.init_topic = Topic(self.participant, INITIALIZATION_TOPIC, Initialization)
 
         # Create the DataWriters and DataReaders
         self.enter_exit_writer = DataWriter(self.publisher, self.entry_exit_topic, qos=reliable_qos)
         self.init_writer = DataWriter(self.publisher, self.init_topic, qos=reliable_qos)
 
         # ROS Publisher for publishing transformation matrix
-        self.transform_pub = rospy.Publisher('transformation_matrix', Float64MultiArray, queue_size=10)
+        self.transform_pub = rospy.Publisher(ROS_TOPIC_TRANSFORMATION_MATRIX, Float64MultiArray, queue_size=10)
 
         # FIXME
-        self.agent_sub_pub = rospy.Publisher('/agents_to_subscribe', Int16MultiArray, queue_size=10)
+        self.agent_sub_pub = rospy.Publisher(ROS_TOPIC_AGENTS_TO_SUBSCRIBE, Int16MultiArray, queue_size=10)
 
         self.heartbeat_agents = list()
-        self.agent_pub = rospy.Publisher('/entry_agents', Int16MultiArray, queue_size=10)
-        self.exited_agent_pub = rospy.Publisher('/exited_agents', Int16MultiArray, queue_size=10)
-        self.agent_sub = rospy.Subscriber('/heartbeat_agents', Int16MultiArray, self.heartbeat_agents_callback)
+        self.agent_pub = rospy.Publisher(ROS_TOPIC_ENTRY_AGENTS, Int16MultiArray, queue_size=10)
+        self.exited_agent_pub = rospy.Publisher(ROS_TOPIC_EXITED_AGENTS, Int16MultiArray, queue_size=10)
+        self.agent_sub = rospy.Subscriber(ROS_TOPIC_HEARTBEAT_AGENTS, Int16MultiArray, self.heartbeat_agents_callback)
 
-        self.entry_exit_listener = EntryExitListener(self.participant, self.publisher, self.subscriber, self.my_id, self.my_ip, self.my_hash, self.init_writer)
+        self.entry_exit_listener = EntryExitListener(
+            self.participant, self.publisher, self.subscriber, self.my_id, self.my_ip, self.my_hash, self.init_writer
+        )
         self.init_listener = InitializationListener(self.my_id)
 
         # We will start the readers later when it is necessary
@@ -450,29 +467,27 @@ class EntryExitCommunication:
 
         # Load the map from the current_map.json file and publish it
         self.load_map()
-        
+
         # Now get reference points
-        self.known_points = []
         rospack = rospkg.RosPack()
-        package_path = rospack.get_path('mattbot_dds')
-        with open(os.path.join(package_path, 'scripts', 'known_points.txt'), 'r') as f:
-            for line in f:
-                x, y = line.split(',')
-                self.known_points.append((float(x), float(y)))
+        package_path = rospack.get_path("mattbot_dds")
+        self.known_points = _read_known_points(os.path.join(package_path, "scripts", "known_points.txt"))
 
         self.entry_exit_listener.update_known_points(self.known_points)
 
-        self.enter_exit_reader = DataReader(self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener, qos=reliable_qos)
+        self.enter_exit_reader = DataReader(
+            self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener, qos=reliable_qos
+        )
         self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener, qos=reliable_qos)
 
         # Broadcast an entry message
-        entry_message = EntryExit(int(self.my_id), AGENT_TYPE, 'enter', self.my_ip, int(time.time()))
+        entry_message = EntryExit(int(self.my_id), DEFAULT_AGENT_TYPE, "enter", self.my_ip, int(time.time()))
         self.enter_exit_writer.write(entry_message)
 
         # Wait for the reference points to become available
         num_tries = 0
-        while not self.init_listener.known_points_available() and num_tries < 10:
-            print("    Reference Points not yet received (attempt {0}/10)".format(num_tries+1))
+        while not self.init_listener.known_points_available() and num_tries < INIT_MAX_RETRIES:
+            print("    Reference Points not yet received (attempt {0}/{1})".format(num_tries + 1, INIT_MAX_RETRIES))
             time.sleep(1)
             if not self.init_listener.known_points_available():
                 entry_message.timestamp = int(time.time())
@@ -488,23 +503,23 @@ class EntryExitCommunication:
 
             # Add myself to the agents dictionary
             self.agents[int(self.my_id)] = {
-                'agent_type': AGENT_TYPE,
-                'ip_address': self.my_ip,
-                'hash': self.my_hash,
-                'timestamp': int(time.time())
+                "agent_type": DEFAULT_AGENT_TYPE,
+                "ip_address": self.my_ip,
+                "hash": self.my_hash,
+                "timestamp": int(time.time()),
             }
 
             # Update the agents in the entry/exit listener
             self.entry_exit_listener.update_agents(agents=self.agents)
-        else: 
+        else:
             print("    I am the first agent, my map will be the reference map")
             self.reference_known_points = self.known_points
 
             self.agents[int(self.my_id)] = {
-                'agent_type': AGENT_TYPE,
-                'ip_address': self.my_ip,
-                'hash': self.my_hash,
-                'timestamp': int(time.time())
+                "agent_type": DEFAULT_AGENT_TYPE,
+                "ip_address": self.my_ip,
+                "hash": self.my_hash,
+                "timestamp": int(time.time()),
             }
 
         self.create_transform()  # Create the transform from the known points
@@ -513,14 +528,14 @@ class EntryExitCommunication:
         self.entry_exit_listener.update_known_points(self.reference_known_points)
 
         # Update the agents in the entry/exit listener
-        self.entry_exit_listener.update_agents(agents=self.agents)  
+        self.entry_exit_listener.update_agents(agents=self.agents)
 
         # Start the heartbeat reader now that we have the reference points, stop listening for initialization messages
         self.init_reader = None
         self.init_listener = None
 
         # Send confirmation message to entry_exit topic
-        entry_message = EntryExit(int(self.my_id), AGENT_TYPE, 'initialized', self.my_ip, int(time.time()))
+        entry_message = EntryExit(int(self.my_id), DEFAULT_AGENT_TYPE, "initialized", self.my_ip, int(time.time()))
         self.enter_exit_writer.write(entry_message)
 
         print("Initialization complete")
@@ -529,55 +544,29 @@ class EntryExitCommunication:
 
         # find mattbot_mcl package path
         rospack = rospkg.RosPack()
-        package_path = rospack.get_path('mattbot_mcl')
+        package_path = rospack.get_path("mattbot_mcl")
+        map_json_dir = os.path.join(package_path, "map_json")
 
-        # load the map from the current_map.json file
-        with open(os.path.join(package_path, 'map_json', 'current_map.json'), 'r') as f:
-            data = json.load(f)
-        map_data = data.get('data', {}).get('map', {})
+        with open(os.path.join(map_json_dir, "current_map.json"), "r") as f:
+            map_data = json.load(f).get("data", {}).get("map", {})
 
-        with open(os.path.join(package_path, 'map_json', 'current_map_mod.json'), 'r') as f:
-            mod_data = json.load(f)
-        map_mod_data = mod_data.get('data', {}).get('map', {})
+        with open(os.path.join(map_json_dir, "current_map_mod.json"), "r") as f:
+            map_mod_data = json.load(f).get("data", {}).get("map", {})
 
-        self.map_msg.header.frame_id = 'map'
-        self.map_msg.info.width = map_data.get('width')
-        self.map_msg.info.height = map_data.get('height')
-        self.map_msg.info.resolution = map_data.get('resolution')
-        self.map_msg.info.origin.position.x = map_data.get('origin_x')
-        self.map_msg.info.origin.position.y = map_data.get('origin_y')
-        self.map_msg.info.origin.position.z = map_data.get('origin_z')
-        self.map_msg.info.origin.orientation.x = map_data.get('origin_orientation_x')
-        self.map_msg.info.origin.orientation.y = map_data.get('origin_orientation_y')
-        self.map_msg.info.origin.orientation.z = map_data.get('origin_orientation_z')
-        self.map_msg.info.origin.orientation.w = map_data.get('origin_orientation_w')
-        self.map_msg.data = map_data.get('occupancy')
-
-        self.map_mod_msg = OccupancyGrid()
-        self.map_mod_msg.header.frame_id = 'map'
-        self.map_mod_msg.info.width = map_mod_data.get('width')
-        self.map_mod_msg.info.height = map_mod_data.get('height')
-        self.map_mod_msg.info.resolution = map_mod_data.get('resolution')
-        self.map_mod_msg.info.origin.position.x = map_mod_data.get('origin_x')
-        self.map_mod_msg.info.origin.position.y = map_mod_data.get('origin_y')
-        self.map_mod_msg.info.origin.position.z = map_mod_data.get('origin_z')
-        self.map_mod_msg.info.origin.orientation.x = map_mod_data.get('origin_orientation_x')
-        self.map_mod_msg.info.origin.orientation.y = map_mod_data.get('origin_orientation_y')
-        self.map_mod_msg.info.origin.orientation.z = map_mod_data.get('origin_orientation_z')
-        self.map_mod_msg.info.origin.orientation.w = map_mod_data.get('origin_orientation_w')
-        self.map_mod_msg.data = map_mod_data.get('occupancy')
+        self.map_msg = _occupancy_grid_from_map_dict(map_data)
+        self.map_mod_msg = _occupancy_grid_from_map_dict(map_mod_data)
 
         self.map_md_msg.map_load_time = rospy.Time.now()
-        self.map_md_msg.resolution = map_data.get('resolution')
-        self.map_md_msg.width = map_data.get('width')
-        self.map_md_msg.height = map_data.get('height')
-        self.map_md_msg.origin.position.x = map_data.get('origin_x')
-        self.map_md_msg.origin.position.y = map_data.get('origin_y')
-        self.map_md_msg.origin.position.z = map_data.get('origin_z')
-        self.map_md_msg.origin.orientation.x = map_data.get('origin_orientation_x')
-        self.map_md_msg.origin.orientation.y = map_data.get('origin_orientation_y')
-        self.map_md_msg.origin.orientation.z = map_data.get('origin_orientation_z')
-        self.map_md_msg.origin.orientation.w = map_data.get('origin_orientation_w')
+        self.map_md_msg.resolution = map_data.get("resolution")
+        self.map_md_msg.width = map_data.get("width")
+        self.map_md_msg.height = map_data.get("height")
+        self.map_md_msg.origin.position.x = map_data.get("origin_x")
+        self.map_md_msg.origin.position.y = map_data.get("origin_y")
+        self.map_md_msg.origin.position.z = map_data.get("origin_z")
+        self.map_md_msg.origin.orientation.x = map_data.get("origin_orientation_x")
+        self.map_md_msg.origin.orientation.y = map_data.get("origin_orientation_y")
+        self.map_md_msg.origin.orientation.z = map_data.get("origin_orientation_z")
+        self.map_md_msg.origin.orientation.w = map_data.get("origin_orientation_w")
 
         # Publish the map and map metadata for ROS nodes
         self.map_publisher.publish(self.map_msg)
@@ -594,7 +583,7 @@ class EntryExitCommunication:
         self.t = None
         if self.known_points == self.reference_known_points:
             self.R = np.identity(2)
-            self.t = np.zeros((2,1))
+            self.t = np.zeros((2, 1))
         else:
             # Find the transform from the known points
             known_points = np.array(self.known_points)
@@ -619,34 +608,7 @@ class EntryExitCommunication:
             self.t = t
 
         # Now publish the transformation matrix
-        transform_msg = Float64MultiArray()
-        transform_msg.data = np.concatenate((self.R.flatten(), self.t.flatten()))
-        self.transform_pub.publish(transform_msg)
-
-    def transform_point(self, point, forward=True):
-        """
-        Transforms a point from the current map to the reference map or vice versa
-
-        Parameters:
-        - point (tuple): The point to be transformed.
-        - forward (bool): True if transforming from current map to reference map, False otherwise.
-
-        Returns:
-        - tuple: The transformed point.
-        """
-        if self.R is None:
-            return point
-
-        point_xy = np.array([point[0], point[1]])
-        if forward:
-            new_point_xy = self.R @ point_xy + self.t
-            new_point_theta = point[2] + np.arctan2(self.R[1, 0], self.R[0, 0])
-            return np.concatenate((new_point_xy, [new_point_theta]))
-        else:
-            new_point_xy = self.R.T @ (point_xy - self.t)
-            new_point_theta = point[2] - np.arctan2(self.R[1, 0], self.R[0, 0])
-            return np.concatenate((new_point_xy, [new_point_theta]))
-
+        self.transform_pub.publish(pack_transform_msg(self.R, self.t))
 
     def run(self):
         """
@@ -673,7 +635,7 @@ class EntryExitCommunication:
                 self.map_publisher.publish(self.map_msg)
                 self.map_mod_publisher.publish(self.map_mod_msg)
                 self.map_md_publisher.publish(self.map_md_msg)
-                   
+
                 # Check for new agents
                 if self.entry_exit_listener.agent_update_available():
                     self.agents, newly_exited_agents = self.entry_exit_listener.get_agents()
@@ -694,10 +656,10 @@ class EntryExitCommunication:
                 for agent_id in new_agents:
                     if agent_id not in exited_agents:
                         self.agents[agent_id] = {
-                            'agent_type': "unknown",
-                            'ip_address': "unknown",
-                            'hash': hash_func(str(agent_id)),
-                            'timestamp': int(time.time())
+                            "agent_type": "unknown",
+                            "ip_address": "unknown",
+                            "hash": hash_robot_id(str(agent_id)),
+                            "timestamp": int(time.time()),
                         }
                         update_to_active_agents = True
 
@@ -712,7 +674,7 @@ class EntryExitCommunication:
                 # Update the entry/exit listener with the new agents
                 if update_to_active_agents:
                     self.entry_exit_listener.update_agents(agents=self.agents)
-            
+
                 self.update_agents(exited_agents=exited_agents)
 
             agent_list_minus_self = list(self.agents.keys())
@@ -736,15 +698,14 @@ class EntryExitCommunication:
             self.exited_agent_pub.publish(exited_agents)
 
     def shutdown(self):
-        print('\nSending exit message...')
+        print("\nSending exit message...")
         # Write exit message
-        exit_message = EntryExit(int(self.my_id), AGENT_TYPE, 'exit', self.my_ip, int(time.time()))
+        exit_message = EntryExit(int(self.my_id), DEFAULT_AGENT_TYPE, "exit", self.my_ip, int(time.time()))
         self.enter_exit_writer.write(exit_message)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
 
     entry_exit_obj = EntryExitCommunication()
     rospy.on_shutdown(entry_exit_obj.shutdown)
     entry_exit_obj.setup_and_run()
-    

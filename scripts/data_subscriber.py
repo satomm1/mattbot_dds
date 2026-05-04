@@ -1,25 +1,16 @@
 import rospy
 from rospy_message_converter import message_converter
-import tf
-import rospkg
 from mattbot_image_detection.msg import DetectedObject, DetectedObjectArray
-# from image_detection_with_unknowns import LabeledObject, LabeledObjectArray
-from sensor_msgs.msg import Image
-from mattbot_dds.msg import AgentSubscription, AgentPath, AgentLocation, MapUpdate
+from geometry_msgs.msg import Pose
+from mattbot_dds.msg import AgentPath, MapUpdate
 from nav_msgs.msg import Path
-from geometry_msgs.msg import Pose, Pose2D
 from std_msgs.msg import Float32MultiArray, Float64MultiArray, Int16MultiArray, Time as RosTimeMsg
 from mattbot_image_detection.msg import FaceEncoding
 
-from cyclonedds.domain import DomainParticipant, DomainParticipantQos
+from cyclonedds.domain import DomainParticipant
 from cyclonedds.topic import Topic
 from cyclonedds.sub import Subscriber, DataReader
-from cyclonedds.pub import Publisher, DataWriter
-from cyclonedds.util import duration
-from cyclonedds.idl import IdlStruct
-from cyclonedds.idl.types import sequence
-from cyclonedds.core import Qos, Policy, Listener
-from cyclonedds.builtin import BuiltinDataReader, BuiltinTopicDcpsParticipant
+from cyclonedds.core import Listener
 
 from database_utils import RobotDatabase
 
@@ -28,17 +19,45 @@ import os
 import json
 import numpy as np
 
-from dds_utils import DataMessage, reliable_qos, MSG_GLOBAL_OBSERVE_START
+from dds_utils import (
+    MSG_DETECTED_OBJECT,
+    MSG_FACE_ENCODING,
+    MSG_GLOBAL_OBSERVE_START,
+    MSG_MAP_UPDATE,
+    MSG_PATH,
+    MSG_SENSOR_DETECTED_OBJECTS,
+    MSG_STAR_ENCODER_STATE,
+    MSG_STAR_GRU_OUT_EGO,
+    DataMessage,
+    ROS_TOPIC_AGENTS_TO_SUBSCRIBE,
+    ROS_TOPIC_TRANSFORMATION_MATRIX,
+    TransformMixin,
+    data_topic_name,
+    parse_transform_msg,
+    reliable_qos,
+)
 
 ##################################################
 # This script is used to subscribe to various DataTopics
 # and process them.
 ##################################################
 
-class DataListener(Listener):
 
-    def __init__(self, my_id, topic_id, object_publisher, object_sensor_publisher, path_publisher, map_update_publisher, face_encoding_publisher, global_observe_publisher=None, sqlite_db=None):
+class DataListener(Listener, TransformMixin):
+    def __init__(
+        self,
+        my_id,
+        topic_id,
+        object_publisher,
+        object_sensor_publisher,
+        path_publisher,
+        map_update_publisher,
+        face_encoding_publisher,
+        global_observe_publisher=None,
+        sqlite_db=None,
+    ):
         super().__init__()
+        self.init_transform_state()
         self.my_id = my_id
         self.topic_id = topic_id
         self.object_publisher = object_publisher
@@ -50,8 +69,6 @@ class DataListener(Listener):
 
         self.db = sqlite_db
 
-        self.R = None
-        self.t = None
         self._pub_star_encoder = rospy.Publisher(
             "/team/dds/star_encoder_state/" + str(topic_id),
             Float32MultiArray,
@@ -63,27 +80,9 @@ class DataListener(Listener):
             queue_size=2,
         )
 
-    def transform_point(self, point, forward=True):
-        if self.R is None:
-            return point
-
-        point_xy = np.array([point[0], point[1]])
-        if forward:
-            new_point_xy = self.R @ point_xy + self.t
-            new_point_theta = point[2] + np.arctan2(self.R[1, 0], self.R[0, 0])
-            return np.concatenate((new_point_xy, [new_point_theta]))
-        else:
-            new_point_xy = self.R.T @ (point_xy - self.t)
-            new_point_theta = point[2] - np.arctan2(self.R[1, 0], self.R[0, 0])
-            return np.concatenate((new_point_xy, [new_point_theta]))
-
-    def update_transformation(self, R, t):
-        self.R = R
-        self.t = t
-
     def on_data_available(self, reader):
         for sample in reader.read():
-            
+
             sending_agent = sample.sending_agent
 
             # Check if the message is from the agent
@@ -91,9 +90,11 @@ class DataListener(Listener):
                 message_type = sample.message_type
                 timestamp = sample.timestamp
                 data = json.loads(sample.data)
-                if message_type == "detected_object":
-                    new_object = message_converter.convert_dictionary_to_ros_message('mattbot_image_detection/DetectedObject', data)
-                    
+                if message_type == MSG_DETECTED_OBJECT:
+                    new_object = message_converter.convert_dictionary_to_ros_message(
+                        "mattbot_image_detection/DetectedObject", data
+                    )
+
                     # Now convert pose of detected object to my frame
                     x = new_object.pose.position.x
                     y = new_object.pose.position.y
@@ -105,12 +106,18 @@ class DataListener(Listener):
                     print("Received object from agent " + str(self.topic_id))
 
                     if self.db is not None:
-                        self.db.add_object(new_object.class_name, new_object.pose.position.x, new_object.pose.position.y, self.topic_id, timestamp)
-                elif message_type == "sensor_detected_objects":
-                    x = data['x']
-                    y = data['y']
-                    w = data['w']
-                    class_name = data['class']
+                        self.db.add_object(
+                            new_object.class_name,
+                            new_object.pose.position.x,
+                            new_object.pose.position.y,
+                            self.topic_id,
+                            timestamp,
+                        )
+                elif message_type == MSG_SENSOR_DETECTED_OBJECTS:
+                    x = data["x"]
+                    y = data["y"]
+                    w = data["w"]
+                    class_name = data["class"]
 
                     object_array = DetectedObjectArray()
                     object_array.header.stamp = rospy.Time.now()
@@ -131,13 +138,13 @@ class DataListener(Listener):
                         detected_object.pose = detected_object_pose
                         detected_object.width = w[i]
                         object_array.objects.append(detected_object)
-                    
+
                     # print(object_array)
                     # if len(object_array.objects) > 0:
                     self.object_sensor_publisher.publish(object_array)
 
-                elif message_type == "path":
-                    new_path = message_converter.convert_dictionary_to_ros_message('nav_msgs/Path', data)
+                elif message_type == MSG_PATH:
+                    new_path = message_converter.convert_dictionary_to_ros_message("nav_msgs/Path", data)
 
                     # Now convert poses of path to my frame
                     for i in range(len(new_path.poses)):
@@ -152,9 +159,9 @@ class DataListener(Listener):
                     new_agent_path.path = new_path
                     self.path_publisher.publish(new_agent_path)
                     print("Received path from agent " + str(self.topic_id))
-                
-                elif message_type == "map_update":
-                    map_update = message_converter.convert_dictionary_to_ros_message('mattbot_dds/MapUpdate', data)
+
+                elif message_type == MSG_MAP_UPDATE:
+                    map_update = message_converter.convert_dictionary_to_ros_message("mattbot_dds/MapUpdate", data)
 
                     # Need to transform the map update to my frame
                     x = map_update.x
@@ -163,17 +170,17 @@ class DataListener(Listener):
 
                     map_update.x = new_point[0]
                     map_update.y = new_point[1]
-        
+
                     # Publish the map update
                     self.map_update_publisher.publish(map_update)
 
-                elif message_type in ("star_encoder_state", "star_gru_out_ego"):
+                elif message_type in (MSG_STAR_ENCODER_STATE, MSG_STAR_GRU_OUT_EGO):
                     vec = data.get("v")
                     if not isinstance(vec, list):
                         continue
                     out = Float32MultiArray()
                     out.data = [float(x) for x in vec]
-                    if message_type == "star_encoder_state":
+                    if message_type == MSG_STAR_ENCODER_STATE:
                         self._pub_star_encoder.publish(out)
                     else:
                         self._pub_star_gru.publish(out)
@@ -194,10 +201,10 @@ class DataListener(Listener):
                         tmsg.data,
                     )
 
-                elif message_type == "face_encoding":
+                elif message_type == MSG_FACE_ENCODING:
                     data = json.loads(sample.data)
-                    encoding = data['encoding']
-                    name = data['name']
+                    encoding = data["encoding"]
+                    name = data["name"]
 
                     face_encoding = FaceEncoding()
                     face_encoding.encoding = list(encoding)
@@ -212,18 +219,19 @@ class DataListener(Listener):
                 continue
 
 
-class DataSubscriber:
-
+class DataSubscriber(TransformMixin):
     def __init__(self):
-        
-        rospy.init_node('dds_data_subscriber', anonymous=True)
+
+        rospy.init_node("dds_data_subscriber", anonymous=True)
+
+        self.init_transform_state()
 
         # Get robot ID, Hash, and IP Address
-        self.my_id = os.environ.get('ROBOT_ID')
+        self.my_id = os.environ.get("ROBOT_ID")
         self.agents_subscribed = set()
 
         # Get sqlite parameter
-        self.sqlite = rospy.get_param('~sqlite', False)
+        self.sqlite = rospy.get_param("~sqlite", False)
         self.db = None
         if self.sqlite:
             self.db = RobotDatabase()
@@ -236,15 +244,13 @@ class DataSubscriber:
         self.data_listeners = dict()
         self.data_readers = dict()
 
-        self.R = None
-        self.t = None
-        transformation_subscriber = rospy.Subscriber('transformation_matrix', Float64MultiArray, self.transformation_callback)
+        rospy.Subscriber(ROS_TOPIC_TRANSFORMATION_MATRIX, Float64MultiArray, self.transformation_callback)
 
-        self.object_publisher = rospy.Publisher('/object_from_agent', DetectedObject, queue_size=10)
-        self.object_sensor_publisher = rospy.Publisher('/object_from_sensor', DetectedObjectArray, queue_size=10)
-        self.path_publisher = rospy.Publisher('/path_from_agent', AgentPath, queue_size=10)
-        self.map_update_publisher = rospy.Publisher('/map_update', MapUpdate, queue_size=10)
-        self.face_encoding_publisher = rospy.Publisher('/new_face_encoding', FaceEncoding, queue_size=10)
+        self.object_publisher = rospy.Publisher("/object_from_agent", DetectedObject, queue_size=10)
+        self.object_sensor_publisher = rospy.Publisher("/object_from_sensor", DetectedObjectArray, queue_size=10)
+        self.path_publisher = rospy.Publisher("/path_from_agent", AgentPath, queue_size=10)
+        self.map_update_publisher = rospy.Publisher("/map_update", MapUpdate, queue_size=10)
+        self.face_encoding_publisher = rospy.Publisher("/new_face_encoding", FaceEncoding, queue_size=10)
 
         self._global_observe_ros_topic = rospy.get_param("~global_observe_start_ros_topic", "/global_observe_start").strip() or "/global_observe_start"
         self._relay_global_observe = bool(rospy.get_param("~relay_global_observe_start_from_dds", True))
@@ -264,52 +270,21 @@ class DataSubscriber:
 
         self.subscribed_agents = set()
         self.agents_to_subscribe = set()
-        self.agents_to_subscribe_subscriber = rospy.Subscriber('/agents_to_subscribe', Int16MultiArray, self.agents_to_subscribe_callback)
+        self.agents_to_subscribe_subscriber = rospy.Subscriber(
+            ROS_TOPIC_AGENTS_TO_SUBSCRIBE, Int16MultiArray, self.agents_to_subscribe_callback
+        )
 
     def transformation_callback(self, data):
-        # Get the transformation matrix
-        transformation_matrix = data.data
-
-        # Reshape the transformation matrix
-        self.R = np.array(transformation_matrix[:4]).reshape(2, 2)
-        self.t = np.array(transformation_matrix[4:])
+        self.R, self.t = parse_transform_msg(data)
 
         for agent_id in self.data_listeners:
             self.data_listeners[agent_id].update_transformation(self.R, self.t)
-
-    def transform_point(self, point, forward=True):
-        if self.R is None:
-            return point
-
-        point_xy = np.array([point[0], point[1]])
-        if forward:
-            new_point_xy = self.R @ point_xy + self.t
-            new_point_theta = point[2] + np.arctan2(self.R[1, 0], self.R[0, 0])
-            return np.concatenate((new_point_xy, [new_point_theta]))
-        else:
-            new_point_xy = self.R.T @ (point_xy - self.t)
-            new_point_theta = point[2] - np.arctan2(self.R[1, 0], self.R[0, 0])
-            return np.concatenate((new_point_xy, [new_point_theta]))
-
-    def transform_points(self, points, forward=True):
-        if self.R is None:
-            return points
-
-        points_xy = np.array([points[0,:], points[1,:]])
-        if forward:
-            new_point_xy = self.R @ points_xy + self.t
-            new_point_theta = points[2,:] + np.arctan2(self.R[1, 0], self.R[0, 0])
-            return np.concatenate((new_point_xy, new_point_theta))
-        else:
-            new_point_xy = self.R.T @ (points_xy - self.t)
-            new_point_theta = points[2,:] - np.arctan2(self.R[1, 0], self.R[0, 0])
-            return np.concatenate((new_point_xy, [new_point_theta]))      
 
     def agents_to_subscribe_callback(self, data):
         # Get the list of agents to subscribe to
         agents_to_subscribe = data.data
 
-        self.agents_to_subscribe = set(agents_to_subscribe)  
+        self.agents_to_subscribe = set(agents_to_subscribe)
 
     def run(self):
         while not rospy.is_shutdown():
@@ -319,14 +294,22 @@ class DataSubscriber:
 
                 for agent_id in new_agents:
                     print(f"    Subscribed to agent {agent_id} data")
-                    new_data_topic = Topic(self.participant, 'DataTopic' + str(agent_id), DataMessage)
-                    self.data_listeners[agent_id] = DataListener(self.my_id, agent_id, self.object_publisher,
-                                                                    self.object_sensor_publisher, self.path_publisher,
-                                                                    self.map_update_publisher, self.face_encoding_publisher,
-                                                                    global_observe_publisher=self.global_observe_publisher,
-                                                                    sqlite_db=self.db)
+                    new_data_topic = Topic(self.participant, data_topic_name(agent_id), DataMessage)
+                    self.data_listeners[agent_id] = DataListener(
+                        self.my_id,
+                        agent_id,
+                        self.object_publisher,
+                        self.object_sensor_publisher,
+                        self.path_publisher,
+                        self.map_update_publisher,
+                        self.face_encoding_publisher,
+                        global_observe_publisher=self.global_observe_publisher,
+                        sqlite_db=self.db,
+                    )
                     self.data_listeners[agent_id].update_transformation(self.R, self.t)
-                    self.data_readers[agent_id] = DataReader(self.subscriber, new_data_topic, listener=self.data_listeners[agent_id], qos=reliable_qos)
+                    self.data_readers[agent_id] = DataReader(
+                        self.subscriber, new_data_topic, listener=self.data_listeners[agent_id], qos=reliable_qos
+                    )
 
                 for agent_id in old_agents:
                     print(f"    Unsubscribed from agent {agent_id} data")
@@ -336,7 +319,7 @@ class DataSubscriber:
                     self.data_listeners.pop(agent_id)
 
                 self.subscribed_agents = self.agents_to_subscribe
-        
+
             except Exception as e:
                 pass
 
@@ -346,8 +329,8 @@ class DataSubscriber:
         print("Shutting down DDS Data Subscriber")
 
 
-if __name__ == '__main__':
-    
+if __name__ == "__main__":
+
     data_subscriber = DataSubscriber()
     time.sleep(11)  # Wait
     rospy.on_shutdown(data_subscriber.shutdown)
