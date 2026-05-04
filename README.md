@@ -1,43 +1,105 @@
-# DDS Package
+# mattbot_dds
 
-This package uses the data distribution service (DDS) to facilitate communications between heterogenous agents without relying on ROS. Below is a summary of all the scripts, along with an important note on communicating locations among agents.
+This package uses the [Data Distribution Service (DDS)](https://www.omg.org/spec/DDS/) (CycloneDDS) so heterogeneous agents can exchange data without going through ROS. ROS is still used **on each robot** to bridge DDS to local nodes (navigation, perception, etc.).
 
-## Communicating Locations
-Because this platform allows heterogeneous agents (different robots, sensors, etc.), the internal map representation for each agent may be slightly different. For example, two robots of different height will have a different LIDAR based map, and possibly different admissible locations it can possible access. We need some way to reconcile these different maps. 
+**Prerequisite:** set `ROBOT_ID` to a non-empty integer before launching any node in this package. DDS topic names and routing depend on it (see `dds_utils.network.require_robot_id_int`). On each robot you can persist that with a line such as `export ROBOT_ID=2` in `~/.bashrc`, then `source ~/.bashrc` or open a new shell before `roslaunch`.
 
-To handle these differences in maps, we will designate a single map frame as the reference map. In our case, we use the map of the first agent to join the network as the reference map frame. All communications of location data across the DDS network must then be sent only in this map frame. Agents with a local map different from the reference map therefore must:
-- Transform their location data to the reference map before transmitting data, and
-- Transform any received location data back to their local map before processing the data
+---
 
-To accomplish this transform, we use a simple linear transformation between frames based on known common points. Each agent must store the location of at least 3 common points in their local map frame. Upon entering the DDS network, they will receive the location of these common points in the reference map frame. Then, the agent can compute the transformation matrix necessary for transforming between the map frames.
+## Directed vs peer data (read this first)
+
+Fleet traffic uses per-agent DDS topics named `DataTopic{agent_id}` (`dds_utils.data_topic_name`).
+
+| Path | DDS reader | Typical `sending_agent` | Purpose |
+|------|------------|-------------------------|---------|
+| **Directed to this robot** | `own_data_subscriber.py` on **your** `DataTopic{ROBOT_ID}` | Orchestrator / another robot (not self) | Goals, multi-robot goals, position init, unknown-image requests, **human stop** (`MSG_STOP`) |
+| **Peer telemetry** | `data_subscriber.py` on **each peer’s** `DataTopic{peer_id}` (from `/agents_to_subscribe`) | Must equal that **peer’s** id | Objects, paths, map updates, face encodings, STAR tensors, relayed `global_observe_start`, etc. |
+
+Orchestrators (e.g. a central `goal_publisher` that consumes GraphQL) write `DataMessage` samples **onto the target robot’s** `DataTopic{rid}`. Those samples are **not** visible to `data_subscriber.py`’s peer-only pattern; they are handled by **`own_data_subscriber.py`**.
+
+**Orchestrator / human node codebase:** [github.com/satomm1/dds_robot_platform](https://github.com/satomm1/dds_robot_platform) — reference implementation for fleet-facing services (e.g. goals and human stop requests emitted as DDS `DataMessage`s to each robot’s data topic).
+
+---
+
+## Human / fleet stop → ROS
+
+When a `DataMessage` with `message_type == "stop"` arrives on this robot’s data topic (JSON payload often includes `"source": "human"`), **`own_data_subscriber.py`** publishes `std_msgs/Bool` **`data: true`** on ROS (default topic **`/stop`**).
+
+- **Publisher param:** `~stop_ros_topic` (default `/stop`) on node `dds_own_data_subscriber`.
+- **Downstream:** e.g. `mattbot_navigation` `localize_and_navigate2.py` subscribes to `~/stop_topic` (default `/stop`) and transitions to **IDLE** with zero `cmd_vel` when stopping. Keep these topic names aligned in launch files if you override them.
+
+Constant: `MSG_STOP` in `src/dds_utils/messages.py` (re-exported from `dds_utils`).
+
+---
+
+## Communicating locations across maps
+
+Because agents may use different local maps (resolution, origin, sensor coverage), the stack assumes a **reference map**. All **shared** poses sent over DDS must be expressed in that reference frame; each agent transforms **outbound** data to the reference frame and **inbound** data back to its local map using a 2D linear map from correspondence points.
 
 > [!IMPORTANT]
-> The known points should be stored in the [`./scripts/known_points.txt`](./scripts/known_points.txt) file. Each line represents a point and should be in the `x,y` format. To make it easy to get the reference points, run the `get_reference_points` launch file from the `mattbot_bringup` package. Manually navigate the mobile robot to the known points and the script will record the coordinates.
+> Store correspondence points in [`scripts/known_points.txt`](scripts/known_points.txt), one `x,y` per line (local map). To capture reference-frame coordinates, use the `get_reference_points` launch file from `mattbot_bringup`, drive the robot to the same physical locations, and record them.
 
-## Summary of Scripts
-**entry_exit.py**: This script facilitates the entry and exit of agents to the DDS network. 
+Agents must subscribe to the shared ROS transform (`transformation_matrix` / `/transformation_matrix` per `dds_utils.topics`) so bridge nodes can apply `TransformMixin.transform_point`.
 
-**heartbeat_publisher.py**: Publishes the heartbeat of the current agent
+---
 
-**heartbeat_subscriber.py**: Subscribes to heartbeats from other agents
+## Package layout
 
-**data_publisher.py**: Publishes data generated by this agent
+| Path | Role |
+|------|------|
+| [`src/dds_utils/`](src/dds_utils/) | Shared constants (`MSG_*`, ROS topic names), `DataMessage` IDL types, QoS, participant helpers, `TransformMixin` |
+| [`msg/`](msg/) | Custom ROS messages (`AgentPath`, `MapUpdate`, `MultiRobotGoalPlan`, …) used by bridges |
+| [`scripts/`](scripts/) | ROS nodes (Python) |
+| [`launch/dds.launch`](launch/dds.launch) | Default stack for a single agent |
 
-**data_subscriber.py**: Subscribes to data from other agents
+---
 
-**own_data_subscriber.py**: Subscribes to data sent specifically to this agent
+## Scripts (nodes)
 
-**location_publisher.py**: Publishes the location of this agent
+| Script | Node (typical) | Role |
+|--------|----------------|------|
+| `entry_exit.py` | `agent_entry_exit` | Agent join/leave on the DDS initialization / entry-exit topics |
+| `heartbeat_publisher.py` | `heartbeat_publisher` | Publish this agent’s heartbeat |
+| `heartbeat_subscriber.py` | `heartbeat_subscriber` | Track other agents’ heartbeats → ROS (`/heartbeat_agents`, etc.) |
+| `location_publisher.py` | `location_publisher` | Publish this robot’s pose to DDS |
+| `location_subscriber.py` | `location_subscriber` | Other agents’ poses → ROS |
+| `data_publisher.py` | `dds_data_publisher` | ROS → DDS: objects, paths, goals, invalid goals, faces, multi-robot plans, optional STAR tensors, optional `global_observe_start` forwarding |
+| `data_subscriber.py` | `dds_data_subscriber` | DDS (peers) → ROS: e.g. `/object_from_agent`, `/object_from_sensor`, `/path_from_agent`, `/map_update`, `/new_face_encoding`, `/team/dds/...`, latched global observe relay |
+| `own_data_subscriber.py` | `dds_own_data_subscriber` | DDS (**this** `DataTopic`) → ROS: `/external_goal`, `/external_goal_multi`, `/initialpose`, `/send_unknown_images`, **`/stop`** |
+| `image_publisher.py` | (not in `dds.launch` by default) | Image DDS bridge when you run it explicitly |
 
-**location_subscriber.py**: Subscribes to the location of other agents
+Deprecated and test helpers live under `scripts/deprecated/` and `scripts/testing/`.
 
-## Launch Files
-- **dds.launch**: Launches all the relevant DDS files for full operations
+---
 
-```
+## `dds.launch` arguments
+
+| Arg | Default | Meaning |
+|-----|---------|---------|
+| `sqlite` | `false` | Enable SQLite logging in `data_publisher`, `data_subscriber`, `own_data_subscriber` |
+| `forward_global_observe_start_via_dds` | `true` | `data_publisher`: ROS trigger → DDS `MSG_GLOBAL_OBSERVE_START` |
+| `relay_global_observe_start_from_dds` | `true` | `data_subscriber`: DDS → ROS latched wall time |
+| `global_observe_start_ros_topic` | `/global_observe_start` | Output topic for relay |
+| `global_observe_start_dds_trigger_topic` | `/global_observe_start_dds` | Input topic for forwarder (avoids echoing `/global_observe_start` back onto DDS) |
+
+Run:
+
+```bash
 roslaunch mattbot_dds dds.launch
 ```
 
-**Author**: Matthew Sato, Stanford Engineering Informatics Group
+---
 
-**License**: This package is licensed under the [MIT License](./LICENSE).
+## ROS topics worth remembering
+
+- **`/agents_to_subscribe`** (`Int16MultiArray`): who `data_subscriber` should attach DDS readers to.
+- **`transformation_matrix`** / **`/transformation_matrix`**: map-frame transform for bridges.
+- **`/stop`** (`Bool`): asserted `true` on human/fleet stop via `own_data_subscriber`; navigation should use the same name or set matching private params.
+
+See `src/dds_utils/topics.py` and each script’s `rospy.get_param` calls for the full list of tunables (`~external_goal_multi_ros_topic`, `~multi_robot_goal_plan_topic`, `~relay_global_observe_start_from_dds`, STAR topic names, sqlite, etc.).
+
+---
+
+**Author:** Matthew Sato, Stanford Engineering Informatics Group
+
+**License:** [MIT License](./LICENSE)
