@@ -2,7 +2,7 @@ import rospy
 import tf
 import sys
 from geometry_msgs.msg import Pose2D, PoseWithCovarianceStamped
-from std_msgs.msg import Float64MultiArray, UInt32
+from std_msgs.msg import Bool, Float64MultiArray, UInt32
 
 from cyclonedds.topic import Topic
 from cyclonedds.sub import Subscriber, DataReader
@@ -20,6 +20,7 @@ from dds_utils import (
     MSG_MULTI_ROBOT_GOAL,
     MSG_POSITION_INIT,
     MSG_SEND_UNKNOWN_IMAGES,
+    MSG_STOP,
     DataMessage,
     POSITION_INIT_RECENT_THRESHOLD_S,
     ROS_TOPIC_TRANSFORMATION_MATRIX,
@@ -59,6 +60,9 @@ class SelfDataListener(Listener, TransformMixin):
         )
         self.send_unknown_images_pub = rospy.Publisher("/send_unknown_images", UInt32, queue_size=10)
         self.init_pub = rospy.Publisher("/initialpose", PoseWithCovarianceStamped, queue_size=10)
+
+        self._stop_topic = rospy.get_param("~stop_ros_topic", "/stop").strip() or "/stop"
+        self._stop_pub = rospy.Publisher(self._stop_topic, Bool, queue_size=1, latch=False)
 
         # Database connection
         self.db = sqlite_db
@@ -163,6 +167,16 @@ class SelfDataListener(Listener, TransformMixin):
                 msg = UInt32()
                 msg.data = sending_agent
                 self.send_unknown_images_pub.publish(msg)
+
+            elif message_type == MSG_STOP:
+                rospy.loginfo(
+                    "dds_own_data_subscriber: stop from agent %s ts=%s payload=%s -> %s",
+                    sending_agent,
+                    timestamp,
+                    data,
+                    self._stop_topic,
+                )
+                self._stop_pub.publish(Bool(data=True))
 
 
 class OwnDataSubscriber(TransformMixin):

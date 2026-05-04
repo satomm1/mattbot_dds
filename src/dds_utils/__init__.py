@@ -32,6 +32,7 @@ from .messages import (
     MSG_SENSOR_DETECTED_OBJECTS,
     MSG_STAR_ENCODER_STATE,
     MSG_STAR_GRU_OUT_EGO,
+    MSG_STOP,
     make_data_message,
 )
 from .lifecycle import dispose_entity, dispose_participant
@@ -96,6 +97,7 @@ __all__ = [
     "MSG_SENSOR_DETECTED_OBJECTS",
     "MSG_STAR_ENCODER_STATE",
     "MSG_STAR_GRU_OUT_EGO",
+    "MSG_STOP",
     "make_data_message",
     "RobotIdError",
     "create_domain_participant",
