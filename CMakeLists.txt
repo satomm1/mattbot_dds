@@ -57,6 +57,9 @@ add_message_files(
   AgentPath.msg
   AgentLocation.msg
   MapUpdate.msg
+  RobotGoalEntry.msg
+  MultiRobotGoalPlan.msg
+  MultiRobotExternalGoal.msg
 )
 
 ## Generate services in the 'srv' folder

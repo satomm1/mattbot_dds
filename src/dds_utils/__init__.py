@@ -65,6 +65,14 @@ class DataMessage(IdlStruct):
 # ROS trigger topic defaults to /global_observe_start_dds (not /global_observe_start) to avoid relay echo.
 MSG_GLOBAL_OBSERVE_START = "global_observe_start"
 
+# Directed goals for fleet coordination; JSON in DataMessage.data mirrors geometry_msgs/Pose2D fields
+# plus plan metadata (same frame contract as message_type "goal" after transform):
+#   x, y, theta — float
+#   plan_id — string
+#   coordinated — bool
+#   target_agent — int (should match the DataTopic{N} recipient)
+MSG_MULTI_ROBOT_GOAL = "multi_robot_goal"
+
 @dataclass
 class Location(IdlStruct):
     """

@@ -23,7 +23,8 @@ import os
 import json
 import numpy as np
 
-from dds_utils import DataMessage, reliable_qos
+from dds_utils import DataMessage, reliable_qos, MSG_MULTI_ROBOT_GOAL
+from mattbot_dds.msg import MultiRobotExternalGoal
 
 ##################################################
 # This script process data messages sent to this agent
@@ -37,6 +38,15 @@ class SelfDataListener(Listener):
         self.my_id = my_id
         self.topic_id = topic_id
         self.goal_pub = rospy.Publisher('/external_goal', Pose2D, queue_size=10)
+        self._external_goal_multi_topic = rospy.get_param(
+            "~external_goal_multi_ros_topic", "/external_goal_multi"
+        ).strip() or "/external_goal_multi"
+        self._mirror_multi_to_external_goal = bool(
+            rospy.get_param("~mirror_multi_robot_goal_to_external_goal", False)
+        )
+        self.goal_multi_pub = rospy.Publisher(
+            self._external_goal_multi_topic, MultiRobotExternalGoal, queue_size=10, latch=False
+        )
         self.send_unknown_images_pub = rospy.Publisher('/send_unknown_images', UInt32, queue_size=10)
         self.init_pub = rospy.Publisher('/initialpose', PoseWithCovarianceStamped, queue_size=10)
 
@@ -75,6 +85,39 @@ class SelfDataListener(Listener):
                 goal_msg.theta = theta
                 self.goal_pub.publish(goal_msg)
 
+                if self.db is not None:
+                    self.db.add_goal(self.my_id, x, y, theta, timestamp)
+
+            elif message_type == MSG_MULTI_ROBOT_GOAL:
+
+                x, y, theta = self.transform_point([data['x'], data['y'], data['theta']], forward=False)
+                plan_id = data.get("plan_id", "")
+                coordinated = bool(data.get("coordinated", True))
+                target_agent = int(data.get("target_agent", int(self.my_id)))
+                if target_agent != int(self.my_id):
+                    rospy.logwarn(
+                        "multi_robot_goal target_agent %s != my_id %s; using transformed pose anyway",
+                        target_agent,
+                        self.my_id,
+                    )
+                ext = MultiRobotExternalGoal()
+                ext.goal.x = x
+                ext.goal.y = y
+                ext.goal.theta = theta
+                ext.plan_id = plan_id
+                ext.coordinated = coordinated
+                ext.source_agent = int(sending_agent)
+                ext.target_agent = int(self.my_id)
+                self.goal_multi_pub.publish(ext)
+                rospy.loginfo(
+                    "Received multi_robot_goal from agent %s plan_id=%s",
+                    sending_agent,
+                    plan_id,
+                )
+                if self._mirror_multi_to_external_goal:
+                    g = Pose2D()
+                    g.x, g.y, g.theta = x, y, theta
+                    self.goal_pub.publish(g)
                 if self.db is not None:
                     self.db.add_goal(self.my_id, x, y, theta, timestamp)
             elif message_type == "position_init":

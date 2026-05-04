@@ -6,6 +6,7 @@ from mattbot_image_detection.msg import DetectedObject, DetectedObjectArray
 from mattbot_image_detection.msg import LabeledObject, LabeledObjectArray
 from sensor_msgs.msg import Image
 from mattbot_dds.msg import AgentSubscription, AgentPath, AgentLocation
+from mattbot_dds.msg import MultiRobotGoalPlan, MultiRobotExternalGoal
 from nav_msgs.msg import Path
 from geometry_msgs.msg import Pose, Pose2D
 from std_msgs.msg import Float32MultiArray, Float64MultiArray, Int16MultiArray, Time as RosTimeMsg
@@ -31,7 +32,7 @@ import json
 import requests
 import numpy as np
 
-from dds_utils import DataMessage, reliable_qos, MSG_GLOBAL_OBSERVE_START
+from dds_utils import DataMessage, reliable_qos, MSG_GLOBAL_OBSERVE_START, MSG_MULTI_ROBOT_GOAL
 
 class DataPublisher:
 
@@ -109,6 +110,96 @@ class DataPublisher:
                 MSG_GLOBAL_OBSERVE_START,
                 self.my_id,
             )
+
+        self._target_data_writers = {}
+        self._external_goal_multi_topic = rospy.get_param(
+            "~external_goal_multi_ros_topic", "/external_goal_multi"
+        ).strip() or "/external_goal_multi"
+        self._pub_external_goal_multi_local = rospy.Publisher(
+            self._external_goal_multi_topic, MultiRobotExternalGoal, queue_size=10, latch=False
+        )
+        self._multi_robot_goal_plan_topic = rospy.get_param(
+            "~multi_robot_goal_plan_topic", "/multi_robot_goal_plan"
+        ).strip() or "/multi_robot_goal_plan"
+        self._sub_multi_robot_plan = rospy.Subscriber(
+            self._multi_robot_goal_plan_topic,
+            MultiRobotGoalPlan,
+            self.multi_robot_goal_plan_callback,
+            queue_size=2,
+        )
+        rospy.loginfo(
+            "dds_data_publisher: multi-robot plans on %s -> DDS %s (local self -> %s)",
+            self._multi_robot_goal_plan_topic,
+            MSG_MULTI_ROBOT_GOAL,
+            self._external_goal_multi_topic,
+        )
+
+    def _get_writer_for_target(self, agent_id):
+        """Reliable DataWriter on DataTopic{agent_id}, cached per target."""
+        if agent_id in self._target_data_writers:
+            return self._target_data_writers[agent_id]
+        topic = Topic(self.participant, "DataTopic" + str(agent_id), DataMessage)
+        writer = DataWriter(self.publisher, topic, qos=reliable_qos)
+        self._target_data_writers[agent_id] = writer
+        return writer
+
+    def multi_robot_goal_plan_callback(self, msg):
+        """Fan out fleet goals to each peer's DataTopic; orchestrator's own id uses local ROS only."""
+        try:
+            my_id_int = int(self.my_id) if self.my_id is not None else None
+        except (TypeError, ValueError):
+            my_id_int = None
+        aid_sender = my_id_int if my_id_int is not None else 0
+
+        for entry in msg.goals:
+            rid = int(entry.robot_id)
+            x = entry.goal.x
+            y = entry.goal.y
+            th = entry.goal.theta
+            new_point = self.transform_point([x, y, th])
+            plan_id = msg.plan_id
+            coordinated = msg.coordinated
+
+            if my_id_int is not None and rid == my_id_int:
+                out = MultiRobotExternalGoal()
+                out.goal.x = float(new_point[0])
+                out.goal.y = float(new_point[1])
+                out.goal.theta = float(new_point[2])
+                out.plan_id = plan_id
+                out.coordinated = coordinated
+                out.source_agent = aid_sender
+                out.target_agent = rid
+                self._pub_external_goal_multi_local.publish(out)
+                rospy.loginfo(
+                    "dds_data_publisher: local multi-robot goal (self): plan_id=%s robot=%s",
+                    plan_id,
+                    rid,
+                )
+                continue
+
+            payload = {
+                "x": float(new_point[0]),
+                "y": float(new_point[1]),
+                "theta": float(new_point[2]),
+                "plan_id": plan_id,
+                "coordinated": bool(coordinated),
+                "target_agent": rid,
+            }
+            dm = DataMessage(
+                message_type=MSG_MULTI_ROBOT_GOAL,
+                sending_agent=aid_sender,
+                timestamp=int(time.time()),
+                data=json.dumps(payload),
+            )
+            writer = self._get_writer_for_target(rid)
+            writer.write(dm)
+            rospy.loginfo(
+                "dds_data_publisher: sent %s to DataTopic%s plan_id=%s",
+                MSG_MULTI_ROBOT_GOAL,
+                rid,
+                plan_id,
+            )
+            time.sleep(0.01)
 
     def _global_observe_start_callback(self, msg: RosTimeMsg):
         aid = int(self.my_id) if self.my_id is not None else 0
