@@ -7,7 +7,8 @@ from nav_msgs.msg import Path
 from std_msgs.msg import Float32MultiArray, Float64MultiArray, Int16MultiArray, Time as RosTimeMsg
 from mattbot_image_detection.msg import FaceEncoding
 
-from cyclonedds.domain import DomainParticipant
+import sys
+
 from cyclonedds.topic import Topic
 from cyclonedds.sub import Subscriber, DataReader
 from cyclonedds.core import Listener
@@ -15,7 +16,6 @@ from cyclonedds.core import Listener
 from database_utils import RobotDatabase
 
 import time
-import os
 import json
 import numpy as np
 
@@ -31,10 +31,14 @@ from dds_utils import (
     DataMessage,
     ROS_TOPIC_AGENTS_TO_SUBSCRIBE,
     ROS_TOPIC_TRANSFORMATION_MATRIX,
+    RobotIdError,
     TransformMixin,
+    create_domain_participant,
     data_topic_name,
+    dispose_participant,
     parse_transform_msg,
     reliable_qos,
+    require_robot_id_int,
 )
 
 ##################################################
@@ -46,7 +50,6 @@ from dds_utils import (
 class DataListener(Listener, TransformMixin):
     def __init__(
         self,
-        my_id,
         topic_id,
         object_publisher,
         object_sensor_publisher,
@@ -58,7 +61,6 @@ class DataListener(Listener, TransformMixin):
     ):
         super().__init__()
         self.init_transform_state()
-        self.my_id = my_id
         self.topic_id = topic_id
         self.object_publisher = object_publisher
         self.object_sensor_publisher = object_sensor_publisher
@@ -226,10 +228,11 @@ class DataSubscriber(TransformMixin):
 
         self.init_transform_state()
 
-        # Get robot ID, Hash, and IP Address
-        self.my_id = os.environ.get("ROBOT_ID")
-        self.agents_subscribed = set()
-
+        try:
+            self.my_id_int = require_robot_id_int()
+        except RobotIdError as exc:
+            rospy.logfatal("%s", exc)
+            sys.exit(1)
         # Get sqlite parameter
         self.sqlite = rospy.get_param("~sqlite", False)
         self.db = None
@@ -237,8 +240,7 @@ class DataSubscriber(TransformMixin):
             self.db = RobotDatabase()
             self.db.create_objects_table()
 
-        # Create a DomainParticipant, Subscriber, and Publisher
-        self.participant = DomainParticipant()
+        self.participant = create_domain_participant(domain_qos=False)
         self.subscriber = Subscriber(self.participant)
 
         self.data_listeners = dict()
@@ -296,7 +298,6 @@ class DataSubscriber(TransformMixin):
                     print(f"    Subscribed to agent {agent_id} data")
                     new_data_topic = Topic(self.participant, data_topic_name(agent_id), DataMessage)
                     self.data_listeners[agent_id] = DataListener(
-                        self.my_id,
                         agent_id,
                         self.object_publisher,
                         self.object_sensor_publisher,
@@ -327,6 +328,11 @@ class DataSubscriber(TransformMixin):
 
     def shutdown(self):
         print("Shutting down DDS Data Subscriber")
+        self.data_readers.clear()
+        self.data_listeners.clear()
+        self.subscriber = None
+        dispose_participant(self.participant)
+        self.participant = None
 
 
 if __name__ == "__main__":

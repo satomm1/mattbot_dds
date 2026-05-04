@@ -34,7 +34,17 @@ from .messages import (
     MSG_STAR_GRU_OUT_EGO,
     make_data_message,
 )
-from .network import get_local_ip, get_robot_id, hash_robot_id, make_participant_qos
+from .lifecycle import dispose_entity, dispose_participant
+from .network import (
+    RobotIdError,
+    get_local_ip,
+    get_robot_id,
+    hash_robot_id,
+    make_participant_qos,
+    parse_robot_id_int,
+    require_robot_id_int,
+)
+from .participant import create_domain_participant
 from .qos import best_effort_qos, reliable_qos
 from .topics import (
     ENTRY_EXIT_TOPIC,
@@ -87,10 +97,16 @@ __all__ = [
     "MSG_STAR_ENCODER_STATE",
     "MSG_STAR_GRU_OUT_EGO",
     "make_data_message",
+    "RobotIdError",
+    "create_domain_participant",
+    "dispose_entity",
+    "dispose_participant",
     "get_local_ip",
     "get_robot_id",
     "hash_robot_id",
     "make_participant_qos",
+    "parse_robot_id_int",
+    "require_robot_id_int",
     "best_effort_qos",
     "reliable_qos",
     "ENTRY_EXIT_TOPIC",

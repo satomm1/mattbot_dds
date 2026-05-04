@@ -8,14 +8,13 @@ from geometry_msgs.msg import Pose2D
 from std_msgs.msg import Float32MultiArray, Float64MultiArray, Time as RosTimeMsg
 from mattbot_image_detection.msg import FaceEncoding
 
-from cyclonedds.domain import DomainParticipant
 from cyclonedds.topic import Topic
 from cyclonedds.pub import Publisher, DataWriter
 
 from database_utils import RobotDatabase
 
+import sys
 import time
-import os
 import json
 import numpy as np
 
@@ -34,11 +33,14 @@ from dds_utils import (
     MSG_STAR_GRU_OUT_EGO,
     DataMessage,
     ROS_TOPIC_TRANSFORMATION_MATRIX,
+    RobotIdError,
     TransformMixin,
+    create_domain_participant,
     data_topic_name,
+    dispose_participant,
     make_data_message,
-    make_participant_qos,
     reliable_qos,
+    require_robot_id_int,
 )
 
 
@@ -48,11 +50,12 @@ class DataPublisher(TransformMixin):
 
         self.init_transform_state()
 
-        self.my_id = os.environ.get("ROBOT_ID")
         try:
-            self.my_id_int = int(self.my_id) if self.my_id is not None else None
-        except (TypeError, ValueError):
-            self.my_id_int = None
+            self.my_id_int = require_robot_id_int()
+        except RobotIdError as exc:
+            rospy.logfatal("%s", exc)
+            sys.exit(1)
+        self.my_id = str(self.my_id_int)
 
         # Get sqlite parameter
         self.sqlite = rospy.get_param("~sqlite", False)
@@ -60,14 +63,11 @@ class DataPublisher(TransformMixin):
         if self.sqlite:
             self.db = RobotDatabase()
 
-        qos_profile = make_participant_qos()
-
-        # Create a DomainParticipant, Subscriber, and Publisher
-        self.participant = DomainParticipant(qos=qos_profile)
+        self.participant = create_domain_participant(domain_qos=True)
         self.publisher = Publisher(self.participant)
 
         # Create my data topic
-        self.data_topic = Topic(self.participant, data_topic_name(self.my_id), DataMessage)
+        self.data_topic = Topic(self.participant, data_topic_name(self.my_id_int), DataMessage)
         self.data_writer = DataWriter(self.publisher, self.data_topic, qos=reliable_qos)
 
         rospy.Subscriber(ROS_TOPIC_TRANSFORMATION_MATRIX, Float64MultiArray, self.transformation_callback)
@@ -144,12 +144,12 @@ class DataPublisher(TransformMixin):
         )
 
     def _sender_id_optional(self):
-        """Matches prior uses: int(my_id) if set else 0."""
-        return self.my_id_int if self.my_id_int is not None else 0
+        """Sending agent id for DDS messages that previously used 0 when ROBOT_ID was unset."""
+        return self.my_id_int
 
     def _sender_id_strict(self):
-        """Matches prior uses: int(self.my_id) for object/goal paths."""
-        return int(self.my_id)
+        """Sending agent id for object/goal paths (always valid after ``require_robot_id_int``)."""
+        return self.my_id_int
 
     def _publish_data(self, message_type, payload, *, sleep=True, sending_agent=None):
         aid = self._sender_id_strict() if sending_agent is None else sending_agent
@@ -180,7 +180,7 @@ class DataPublisher(TransformMixin):
             plan_id = msg.plan_id
             coordinated = msg.coordinated
 
-            if my_id_int is not None and rid == my_id_int:
+            if rid == my_id_int:
                 out = MultiRobotExternalGoal()
                 out.goal.x = float(new_point[0])
                 out.goal.y = float(new_point[1])
@@ -350,6 +350,11 @@ class DataPublisher(TransformMixin):
 
     def shutdown(self):
         print("Shutting down DDS data publisher")
+        self._target_data_writers.clear()
+        self.data_writer = None
+        self.publisher = None
+        dispose_participant(self.participant)
+        self.participant = None
 
 
 if __name__ == "__main__":

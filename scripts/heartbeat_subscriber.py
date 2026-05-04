@@ -1,13 +1,11 @@
 import rospy
 from std_msgs.msg import Int16MultiArray
+import sys
+import time
 
-from cyclonedds.domain import DomainParticipant
 from cyclonedds.topic import Topic
 from cyclonedds.sub import Subscriber, DataReader
 from cyclonedds.core import Listener
-
-import time
-import os
 
 from dds_utils import (
     HEARTBEAT_PERIOD,
@@ -17,8 +15,12 @@ from dds_utils import (
     ROS_TOPIC_ENTRY_AGENTS,
     ROS_TOPIC_EXITED_AGENTS,
     ROS_TOPIC_HEARTBEAT_AGENTS,
+    RobotIdError,
     best_effort_qos,
+    create_domain_participant,
+    dispose_participant,
     get_local_ip,
+    require_robot_id_int,
 )
 
 
@@ -28,15 +30,15 @@ class HeartbeatListener(Listener):
 
     Attributes:
         heartbeats (dict): A dictionary to store the heartbeats of agents.
-        my_id (int): The ID of the current agent.
+        my_id_int (int): The ID of the current agent.
         agents (dict): A dictionary to store information about all agents in the environment.
     """
 
-    def __init__(self, my_id):
+    def __init__(self, my_id_int):
         super().__init__()
         self.heartbeats = dict()
         self.new_heartbeats = dict()
-        self.my_id = my_id
+        self.my_id_int = my_id_int
 
     def on_data_available(self, reader):
         """
@@ -51,7 +53,7 @@ class HeartbeatListener(Listener):
         for sample in reader.read():
 
             # Skip messages from self
-            if sample.agent_id == int(self.my_id):
+            if sample.agent_id == self.my_id_int:
                 continue
 
             self.new_heartbeats[sample.agent_id] = sample.timestamp
@@ -73,8 +75,12 @@ class HeartbeatSubscriber:
     def __init__(self):
         rospy.init_node("dds_heartbeat_subscriber", anonymous=True)
 
-        # Get robot ID, Hash, and IP Address
-        self.my_id = os.environ.get("ROBOT_ID")
+        try:
+            self.my_id_int = require_robot_id_int()
+        except RobotIdError as exc:
+            rospy.logfatal("%s", exc)
+            sys.exit(1)
+        self.my_id = str(self.my_id_int)
 
         self.my_ip = get_local_ip()
         print(f"My IP address is {self.my_ip}")
@@ -89,12 +95,11 @@ class HeartbeatSubscriber:
         self.active_agents_sub = rospy.Subscriber(ROS_TOPIC_ENTRY_AGENTS, Int16MultiArray, self.active_agents_callback)
         self.exited_agents_sub = rospy.Subscriber(ROS_TOPIC_EXITED_AGENTS, Int16MultiArray, self.exited_agents_callback)
 
-        # Create a DomainParticipant, Subscriber
-        self.participant = DomainParticipant()
+        self.participant = create_domain_participant(domain_qos=False)
         self.subscriber = Subscriber(self.participant)
 
         self.heartbeat_topic = Topic(self.participant, HEARTBEAT_TOPIC, Heartbeat)
-        self.heartbeat_listener = HeartbeatListener(self.my_id)
+        self.heartbeat_listener = HeartbeatListener(self.my_id_int)
         self.heartbeat_reader = DataReader(
             self.subscriber, self.heartbeat_topic, listener=self.heartbeat_listener, qos=best_effort_qos
         )
@@ -129,7 +134,6 @@ class HeartbeatSubscriber:
     def run(self):
 
         last_time = int(time.time())
-        prev_exited_agents = set()
         while not rospy.is_shutdown():
             current_time = int(time.time())
 
@@ -157,7 +161,7 @@ class HeartbeatSubscriber:
                 for agent_id, agent_info in self.agents.items():
 
                     # skip self
-                    if agent_id == int(self.my_id):
+                    if agent_id == self.my_id_int:
                         continue
 
                     time_difference = current_time - agent_info["timestamp"]
@@ -178,6 +182,10 @@ class HeartbeatSubscriber:
 
     def shutdown(self):
         rospy.loginfo("Shutting down DDS heartbeat subscriber...")
+        self.heartbeat_reader = None
+        self.subscriber = None
+        dispose_participant(self.participant)
+        self.participant = None
 
 
 if __name__ == "__main__":

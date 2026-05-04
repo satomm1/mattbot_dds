@@ -8,6 +8,38 @@ from cyclonedds.util import duration
 from .config import PARTICIPANT_LEASE_DURATION_MS
 
 
+class RobotIdError(RuntimeError):
+    """ROBOT_ID is missing, empty, or not a base-10 integer."""
+
+
+def parse_robot_id_int(value) -> int:
+    """Parse a robot id value to ``int``; raises ``ValueError`` if invalid."""
+    if value is None:
+        raise ValueError("robot id is None")
+    s = str(value).strip()
+    if not s:
+        raise ValueError("robot id is empty")
+    return int(s)
+
+
+def require_robot_id_int() -> int:
+    """
+    Read ``ROBOT_ID`` from the environment and return it as ``int``.
+
+    Raises:
+        RobotIdError: if unset, whitespace-only, or not a base-10 integer.
+    """
+    raw = os.environ.get("ROBOT_ID")
+    if raw is None or str(raw).strip() == "":
+        raise RobotIdError(
+            "ROBOT_ID environment variable must be set to a non-empty integer agent id"
+        )
+    try:
+        return parse_robot_id_int(raw)
+    except ValueError as exc:
+        raise RobotIdError(f"ROBOT_ID must be a base-10 integer, got {raw!r}") from exc
+
+
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:

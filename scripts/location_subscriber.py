@@ -2,23 +2,25 @@ import rospy
 from std_msgs.msg import Float64MultiArray, Int16MultiArray
 from mattbot_dds.msg import AgentLocation
 import tf
+import sys
 
-from cyclonedds.domain import DomainParticipant
 from cyclonedds.topic import Topic
 from cyclonedds.sub import Subscriber, DataReader
 from cyclonedds.core import Listener
 
-import os
 import numpy as np
 
 from dds_utils import (
     Location,
     ROS_TOPIC_AGENTS_TO_SUBSCRIBE,
     ROS_TOPIC_TRANSFORMATION_MATRIX,
+    RobotIdError,
     TransformMixin,
     best_effort_qos,
+    create_domain_participant,
+    dispose_participant,
     location_topic_name,
-    make_participant_qos,
+    require_robot_id_int,
 )
 
 
@@ -27,7 +29,7 @@ class LocationListener(Listener, TransformMixin):
     Listener class that handles location data for agents.
 
     Attributes:
-        my_id (int): The ID of the listener.
+        my_id_int (int): The ID of the listener.
         agent_ids (list): List of agent IDs.
         locations (dict): Dictionary to store agent locations.
 
@@ -37,10 +39,10 @@ class LocationListener(Listener, TransformMixin):
         set_agent_ids(agent_ids): Sets the agent IDs and updates the locations dictionary.
     """
 
-    def __init__(self, my_id, agent_id):
+    def __init__(self, my_id_int, agent_id):
         super().__init__()
         self.init_transform_state()
-        self.my_id = my_id
+        self.my_id_int = my_id_int
         self.agent_id = agent_id
         self.locations = (None, None, None)
 
@@ -59,7 +61,7 @@ class LocationListener(Listener, TransformMixin):
         for sample in reader.read():
 
             # Skip messages from self
-            if sample.agent_id == int(self.my_id):
+            if sample.agent_id == self.my_id_int:
                 continue
 
             if sample.x is not None and sample.y is not None and sample.theta is not None:
@@ -98,13 +100,14 @@ class LocationSubscriber(TransformMixin):
 
         self.init_transform_state()
 
-        # Get robot ID, Hash, and IP Address
-        self.my_id = os.environ.get("ROBOT_ID")
+        try:
+            self.my_id_int = require_robot_id_int()
+        except RobotIdError as exc:
+            rospy.logfatal("%s", exc)
+            sys.exit(1)
+        self.my_id = str(self.my_id_int)
 
-        qos_profile = make_participant_qos()
-
-        # Create a DomainParticipant, Subscriber, and Publisher
-        self.participant = DomainParticipant(qos=qos_profile)
+        self.participant = create_domain_participant(domain_qos=True)
         self.subscriber = Subscriber(self.participant)
 
         self.location_listeners = dict()
@@ -135,7 +138,7 @@ class LocationSubscriber(TransformMixin):
                 for agent_id in new_agents:
                     print(f"    Subscribed to agent {agent_id} location")
                     new_location_topic = Topic(self.participant, location_topic_name(agent_id), Location)
-                    self.location_listeners[agent_id] = LocationListener(self.my_id, agent_id)
+                    self.location_listeners[agent_id] = LocationListener(self.my_id_int, agent_id)
                     self.location_listeners[agent_id].update_transformation(self.R, self.t)
                     self.location_readers[agent_id] = DataReader(
                         self.subscriber, new_location_topic, listener=self.location_listeners[agent_id], qos=best_effort_qos
@@ -157,6 +160,11 @@ class LocationSubscriber(TransformMixin):
 
     def shutdown(self):
         rospy.loginfo("Shutting down DDS location publisher...")
+        self.location_readers.clear()
+        self.location_listeners.clear()
+        self.subscriber = None
+        dispose_participant(self.participant)
+        self.participant = None
 
 
 if __name__ == "__main__":

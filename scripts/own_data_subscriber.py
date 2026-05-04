@@ -1,9 +1,9 @@
 import rospy
 import tf
+import sys
 from geometry_msgs.msg import Pose2D, PoseWithCovarianceStamped
 from std_msgs.msg import Float64MultiArray, UInt32
 
-from cyclonedds.domain import DomainParticipant
 from cyclonedds.topic import Topic
 from cyclonedds.sub import Subscriber, DataReader
 from cyclonedds.pub import Publisher
@@ -12,7 +12,6 @@ from cyclonedds.core import Listener
 from database_utils import RobotDatabase
 
 import time
-import os
 import json
 import numpy as np
 
@@ -24,10 +23,14 @@ from dds_utils import (
     DataMessage,
     POSITION_INIT_RECENT_THRESHOLD_S,
     ROS_TOPIC_TRANSFORMATION_MATRIX,
+    RobotIdError,
     TransformMixin,
+    create_domain_participant,
     data_topic_name,
+    dispose_participant,
     parse_transform_msg,
     reliable_qos,
+    require_robot_id_int,
 )
 from mattbot_dds.msg import MultiRobotExternalGoal
 
@@ -38,10 +41,11 @@ from mattbot_dds.msg import MultiRobotExternalGoal
 
 class SelfDataListener(Listener, TransformMixin):
 
-    def __init__(self, my_id, topic_id, sqlite_db=None):
+    def __init__(self, my_id, my_id_int, topic_id, sqlite_db=None):
         super().__init__()
         self.init_transform_state()
         self.my_id = my_id
+        self.my_id_int = my_id_int
         self.topic_id = topic_id
         self.goal_pub = rospy.Publisher("/external_goal", Pose2D, queue_size=10)
         self._external_goal_multi_topic = rospy.get_param(
@@ -65,7 +69,7 @@ class SelfDataListener(Listener, TransformMixin):
         for sample in reader.read():
 
             sending_agent = sample.sending_agent
-            if sending_agent == int(self.my_id):
+            if sending_agent == self.my_id_int:
                 # Ignore messages from me
                 continue
 
@@ -96,8 +100,8 @@ class SelfDataListener(Listener, TransformMixin):
                 x, y, theta = self.transform_point([data["x"], data["y"], data["theta"]], forward=False)
                 plan_id = data.get("plan_id", "")
                 coordinated = bool(data.get("coordinated", True))
-                target_agent = int(data.get("target_agent", int(self.my_id)))
-                if target_agent != int(self.my_id):
+                target_agent = int(data.get("target_agent", self.my_id_int))
+                if target_agent != self.my_id_int:
                     rospy.logwarn(
                         "multi_robot_goal target_agent %s != my_id %s; using transformed pose anyway",
                         target_agent,
@@ -110,7 +114,7 @@ class SelfDataListener(Listener, TransformMixin):
                 ext.plan_id = plan_id
                 ext.coordinated = coordinated
                 ext.source_agent = int(sending_agent)
-                ext.target_agent = int(self.my_id)
+                ext.target_agent = self.my_id_int
                 self.goal_multi_pub.publish(ext)
                 rospy.loginfo(
                     "Received multi_robot_goal from agent %s plan_id=%s",
@@ -169,8 +173,12 @@ class OwnDataSubscriber(TransformMixin):
 
         self.init_transform_state()
 
-        # Get robot ID, Hash, and IP Address
-        self.my_id = os.environ.get("ROBOT_ID")
+        try:
+            self.my_id_int = require_robot_id_int()
+        except RobotIdError as exc:
+            rospy.logfatal("%s", exc)
+            sys.exit(1)
+        self.my_id = str(self.my_id_int)
 
         # Get sqlite parameter
         self.sqlite = rospy.get_param("~sqlite", False)
@@ -179,14 +187,13 @@ class OwnDataSubscriber(TransformMixin):
             self.db = RobotDatabase()
             self.db.create_goals_table()
 
-        # Create a DomainParticipant, Subscriber, and Publisher
-        self.participant = DomainParticipant()
+        self.participant = create_domain_participant(domain_qos=False)
         self.subscriber = Subscriber(self.participant)
         self.publisher = Publisher(self.participant)
 
         # Create my data topic
-        self.data_topic = Topic(self.participant, data_topic_name(self.my_id), DataMessage)
-        self.data_listener = SelfDataListener(self.my_id, self.my_id, sqlite_db=self.db)
+        self.data_topic = Topic(self.participant, data_topic_name(self.my_id_int), DataMessage)
+        self.data_listener = SelfDataListener(self.my_id, self.my_id_int, self.my_id_int, sqlite_db=self.db)
         self.data_reader = DataReader(self.subscriber, self.data_topic, listener=self.data_listener, qos=reliable_qos)
 
         rospy.Subscriber(ROS_TOPIC_TRANSFORMATION_MATRIX, Float64MultiArray, self.transformation_callback)
@@ -204,6 +211,11 @@ class OwnDataSubscriber(TransformMixin):
 
     def shutdown(self):
         print("Shutting down DDS Own Data Subscriber")
+        self.data_reader = None
+        self.subscriber = None
+        self.publisher = None
+        dispose_participant(self.participant)
+        self.participant = None
 
 
 if __name__ == "__main__":

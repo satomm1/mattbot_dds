@@ -1,12 +1,11 @@
 import rospy
 from std_msgs.msg import Float64MultiArray
 import tf
+import sys
+import time
 
-from cyclonedds.domain import DomainParticipant
 from cyclonedds.topic import Topic
 from cyclonedds.pub import Publisher, DataWriter
-import time
-import os
 
 from dds_utils import (
     DEFAULT_AGENT_TYPE,
@@ -14,9 +13,13 @@ from dds_utils import (
     HEARTBEAT_TOPIC,
     Heartbeat,
     ROS_TOPIC_TRANSFORMATION_MATRIX_ABS,
+    RobotIdError,
     TransformMixin,
     best_effort_qos,
+    create_domain_participant,
+    dispose_participant,
     get_local_ip,
+    require_robot_id_int,
 )
 
 
@@ -26,13 +29,16 @@ class HeartbeatPublisher(TransformMixin):
 
         self.init_transform_state()
 
-        # Get robot ID, Hash, and IP Address
-        self.my_id = os.environ.get("ROBOT_ID")
+        try:
+            self.my_id_int = require_robot_id_int()
+        except RobotIdError as exc:
+            rospy.logfatal("%s", exc)
+            sys.exit(1)
+        self.my_id = str(self.my_id_int)
 
         self.my_ip = get_local_ip()
 
-        # Create a DomainParticipant, Subscriber, and Publisher
-        self.participant = DomainParticipant()
+        self.participant = create_domain_participant(domain_qos=False)
         self.publisher = Publisher(self.participant)
 
         self.heartbeat_topic = Topic(self.participant, HEARTBEAT_TOPIC, Heartbeat)
@@ -68,7 +74,7 @@ class HeartbeatPublisher(TransformMixin):
 
             # Create a heartbeat message
             heartbeat = Heartbeat(
-                int(self.my_id), int(time.time()), DEFAULT_AGENT_TYPE, self.my_ip, location_valid, x, y, theta, []
+                self.my_id_int, int(time.time()), DEFAULT_AGENT_TYPE, self.my_ip, location_valid, x, y, theta, []
             )
 
             # Publish the heartbeat message
@@ -80,6 +86,10 @@ class HeartbeatPublisher(TransformMixin):
 
     def shutdown(self):
         rospy.loginfo("Shutting down DDS heartbeat publisher...")
+        self.heartbeat_writer = None
+        self.publisher = None
+        dispose_participant(self.participant)
+        self.participant = None
 
 
 if __name__ == "__main__":

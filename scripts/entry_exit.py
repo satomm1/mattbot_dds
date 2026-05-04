@@ -4,7 +4,8 @@ from std_msgs.msg import Float64MultiArray, Int16MultiArray
 import tf
 import rospkg
 
-from cyclonedds.domain import DomainParticipant
+import sys
+
 from cyclonedds.topic import Topic
 from cyclonedds.sub import Subscriber, DataReader
 from cyclonedds.pub import Publisher, DataWriter
@@ -32,12 +33,15 @@ from dds_utils import (
     ROS_TOPIC_MAP_METADATA,
     ROS_TOPIC_MAP_MOD,
     ROS_TOPIC_TRANSFORMATION_MATRIX,
+    RobotIdError,
     TransformMixin,
+    create_domain_participant,
+    dispose_participant,
     get_local_ip,
     hash_robot_id,
-    make_participant_qos,
     pack_transform_msg,
     reliable_qos,
+    require_robot_id_int,
 )
 
 
@@ -96,7 +100,7 @@ class EntryExitListener(Listener):
     - update_map(map, map_md): Updates the occupancy grid map and map metadata.
     """
 
-    def __init__(self, participant, publisher, subscriber, my_id, my_ip, my_hash, init_writer):
+    def __init__(self, participant, publisher, subscriber, my_id, my_id_int, my_ip, my_hash, init_writer):
         super().__init__()
         self.participant = participant
         self.publisher = publisher
@@ -111,6 +115,7 @@ class EntryExitListener(Listener):
         }
 
         self.my_id = my_id
+        self.my_id_int = my_id_int
         self.my_ip = my_ip
         self.my_hash = my_hash
         self.map_msg = OccupancyGrid()
@@ -133,7 +138,7 @@ class EntryExitListener(Listener):
         """
         for sample in reader.read():
 
-            if sample.agent_id == int(self.my_id):
+            if sample.agent_id == self.my_id_int:
                 # Ignore messages from self
                 continue
 
@@ -152,7 +157,7 @@ class EntryExitListener(Listener):
 
                     init_message = Initialization(
                         target_agent=sample.agent_id,
-                        sending_agent=int(self.my_id),
+                        sending_agent=self.my_id_int,
                         agents=agents_message,
                         known_points=known_points_json,
                     )
@@ -275,7 +280,7 @@ class InitializationListener(Listener):
         map_md_publisher: Publisher for the map metadata message.
     """
 
-    def __init__(self, my_id):
+    def __init__(self, my_id, my_id_int):
         super().__init__()
         self.map_received = False
         self.map_msg = OccupancyGrid()
@@ -283,6 +288,7 @@ class InitializationListener(Listener):
         self.map_md_msg = MapMetaData()
         self.agents = dict()
         self.my_id = my_id
+        self.my_id_int = my_id_int
         self.known_points_received = False
         self.reference_known_points = []
 
@@ -297,13 +303,13 @@ class InitializationListener(Listener):
 
             sending_agent = sample.sending_agent
             # Ignore messages from self
-            if sending_agent == int(self.my_id):
+            if sending_agent == self.my_id_int:
                 continue
 
             print(f"    Initialization message received from agent {sending_agent}")
 
             # Ignore messages not intended for this agent
-            if sample.target_agent != int(self.my_id):
+            if sample.target_agent != self.my_id_int:
                 continue
 
             # Load the agents from the initialization message
@@ -379,10 +385,14 @@ class EntryExitCommunication(TransformMixin):
 
         self.init_transform_state()
 
-        # Get robot ID, Hash, and IP Address
-        self.my_id = os.environ.get("ROBOT_ID")
+        try:
+            self.my_id_int = require_robot_id_int()
+        except RobotIdError as exc:
+            rospy.logfatal("%s", exc)
+            sys.exit(1)
+        self.my_id = str(self.my_id_int)
         print(f"\nMy Agent ID is {self.my_id}")
-        self.my_hash = hash_robot_id(self.my_id)
+        self.my_hash = hash_robot_id(self.my_id_int)
 
         self.my_ip = get_local_ip()
         print(f"My IP address is {self.my_ip}")
@@ -398,10 +408,8 @@ class EntryExitCommunication(TransformMixin):
         self.map_mod_publisher = rospy.Publisher(ROS_TOPIC_MAP_MOD, OccupancyGrid, queue_size=10)
         self.map_md_publisher = rospy.Publisher(ROS_TOPIC_MAP_METADATA, MapMetaData, queue_size=10)
 
-        qos_profile = make_participant_qos()
-
         # Create a DomainParticipant, Subscriber, and Publisher
-        self.participant = DomainParticipant(qos=qos_profile)
+        self.participant = create_domain_participant(domain_qos=True)
         self.subscriber = Subscriber(self.participant)
         self.publisher = Publisher(self.participant)
 
@@ -425,9 +433,16 @@ class EntryExitCommunication(TransformMixin):
         self.agent_sub = rospy.Subscriber(ROS_TOPIC_HEARTBEAT_AGENTS, Int16MultiArray, self.heartbeat_agents_callback)
 
         self.entry_exit_listener = EntryExitListener(
-            self.participant, self.publisher, self.subscriber, self.my_id, self.my_ip, self.my_hash, self.init_writer
+            self.participant,
+            self.publisher,
+            self.subscriber,
+            self.my_id,
+            self.my_id_int,
+            self.my_ip,
+            self.my_hash,
+            self.init_writer,
         )
-        self.init_listener = InitializationListener(self.my_id)
+        self.init_listener = InitializationListener(self.my_id, self.my_id_int)
 
         # We will start the readers later when it is necessary
         self.enter_exit_reader = None
@@ -481,7 +496,7 @@ class EntryExitCommunication(TransformMixin):
         self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener, qos=reliable_qos)
 
         # Broadcast an entry message
-        entry_message = EntryExit(int(self.my_id), DEFAULT_AGENT_TYPE, "enter", self.my_ip, int(time.time()))
+        entry_message = EntryExit(self.my_id_int, DEFAULT_AGENT_TYPE, "enter", self.my_ip, int(time.time()))
         self.enter_exit_writer.write(entry_message)
 
         # Wait for the reference points to become available
@@ -502,7 +517,7 @@ class EntryExitCommunication(TransformMixin):
             self.agents = self.init_listener.get_agents()
 
             # Add myself to the agents dictionary
-            self.agents[int(self.my_id)] = {
+            self.agents[self.my_id_int] = {
                 "agent_type": DEFAULT_AGENT_TYPE,
                 "ip_address": self.my_ip,
                 "hash": self.my_hash,
@@ -515,7 +530,7 @@ class EntryExitCommunication(TransformMixin):
             print("    I am the first agent, my map will be the reference map")
             self.reference_known_points = self.known_points
 
-            self.agents[int(self.my_id)] = {
+            self.agents[self.my_id_int] = {
                 "agent_type": DEFAULT_AGENT_TYPE,
                 "ip_address": self.my_ip,
                 "hash": self.my_hash,
@@ -535,7 +550,7 @@ class EntryExitCommunication(TransformMixin):
         self.init_listener = None
 
         # Send confirmation message to entry_exit topic
-        entry_message = EntryExit(int(self.my_id), DEFAULT_AGENT_TYPE, "initialized", self.my_ip, int(time.time()))
+        entry_message = EntryExit(self.my_id_int, DEFAULT_AGENT_TYPE, "initialized", self.my_ip, int(time.time()))
         self.enter_exit_writer.write(entry_message)
 
         print("Initialization complete")
@@ -678,8 +693,8 @@ class EntryExitCommunication(TransformMixin):
                 self.update_agents(exited_agents=exited_agents)
 
             agent_list_minus_self = list(self.agents.keys())
-            if int(self.my_id) in agent_list_minus_self:
-                agent_list_minus_self.remove(int(self.my_id))
+            if self.my_id_int in agent_list_minus_self:
+                agent_list_minus_self.remove(self.my_id_int)
             self.agent_sub_pub.publish(Int16MultiArray(data=agent_list_minus_self))
 
             rate.sleep()
@@ -700,8 +715,17 @@ class EntryExitCommunication(TransformMixin):
     def shutdown(self):
         print("\nSending exit message...")
         # Write exit message
-        exit_message = EntryExit(int(self.my_id), DEFAULT_AGENT_TYPE, "exit", self.my_ip, int(time.time()))
-        self.enter_exit_writer.write(exit_message)
+        exit_message = EntryExit(self.my_id_int, DEFAULT_AGENT_TYPE, "exit", self.my_ip, int(time.time()))
+        if self.enter_exit_writer is not None:
+            self.enter_exit_writer.write(exit_message)
+        self.enter_exit_reader = None
+        self.init_reader = None
+        self.enter_exit_writer = None
+        self.init_writer = None
+        self.subscriber = None
+        self.publisher = None
+        dispose_participant(self.participant)
+        self.participant = None
 
 
 if __name__ == "__main__":

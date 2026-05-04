@@ -1,56 +1,48 @@
 import rospy
-from rospy_message_converter import message_converter
-import tf
-import rospkg
 from sensor_msgs.msg import Image
-
-from cyclonedds.domain import DomainParticipant, DomainParticipantQos
-from cyclonedds.topic import Topic
-from cyclonedds.sub import Subscriber, DataReader
-from cyclonedds.pub import Publisher, DataWriter
-from cyclonedds.util import duration
-from cyclonedds.idl import IdlStruct
-from cyclonedds.idl.types import sequence
-from cyclonedds.core import Qos, Policy, Listener
-from cyclonedds.builtin import BuiltinDataReader, BuiltinTopicDcpsParticipant
-
+import sys
 import time
-import os
-import hashlib
-import socket
-import json
-import requests
-import numpy as np
 
-from dds_utils import ImageMessage, reliable_qos, best_effort_qos
+from cyclonedds.topic import Topic
+from cyclonedds.pub import Publisher, DataWriter
+
+from dds_utils import (
+    ImageMessage,
+    RobotIdError,
+    create_domain_participant,
+    dispose_participant,
+    image_topic_name,
+    reliable_qos,
+    require_robot_id_int,
+)
 
 
 class ImagePublisher:
 
     def __init__(self):
-        rospy.init_node('dds_image_publisher', anonymous=True)
+        rospy.init_node("dds_image_publisher", anonymous=True)
 
-        self.my_id = os.environ.get('ROBOT_ID')
+        try:
+            self.my_id_int = require_robot_id_int()
+        except RobotIdError as exc:
+            rospy.logfatal("%s", exc)
+            sys.exit(1)
+        self.my_id = str(self.my_id_int)
 
-        self.lease_duration_ms = 30000
-        qos_profile = DomainParticipantQos()
-        qos_profile.lease_duration = duration(milliseconds=self.lease_duration_ms)
-
-        # Create a DomainParticipant, Subscriber, and Publisher
-        self.participant = DomainParticipant(qos=qos_profile)
+        self.participant = create_domain_participant(domain_qos=True)
         self.publisher = Publisher(self.participant)
 
         # Create my image topic
-        self.image_topic = Topic(self.participant, 'ImageTopic' + str(self.my_id), ImageMessage)
+        self.image_topic = Topic(self.participant, image_topic_name(self.my_id_int), ImageMessage)
         self.image_writer = DataWriter(self.publisher, self.image_topic, qos=reliable_qos)
 
         # Create a subscriber for the image topic
-        self.image_subscriber = rospy.Subscriber('/camera/color/image_raw', Image, self.image_callback)
+        self.image_subscriber = rospy.Subscriber("/camera/color/image_raw", Image, self.image_callback)
 
     def image_callback(self, msg):
         # Convert ROS Image message to DDS ImageMessage
         image_message = ImageMessage(
-            agent_id=int(self.my_id),
+            agent_id=self.my_id_int,
             timestamp=int(time.time()),  # Convert to milliseconds
             data=msg.data,
             width=msg.width,
@@ -69,10 +61,14 @@ class ImagePublisher:
     def shutdown(self):
         rospy.loginfo("Shutting down Image Publisher...")
         self.image_subscriber.unregister()
+        self.image_writer = None
+        self.publisher = None
+        dispose_participant(self.participant)
+        self.participant = None
         rospy.loginfo("Image Publisher shutdown complete.")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     image_publisher = ImagePublisher()
     rospy.on_shutdown(image_publisher.shutdown)
     image_publisher.run()

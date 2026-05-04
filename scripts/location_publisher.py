@@ -3,13 +3,12 @@ from std_msgs.msg import Float64MultiArray, Int32, Bool, Int16MultiArray
 from geometry_msgs.msg import Pose2D
 from nav_msgs.msg import OccupancyGrid
 import tf
+import sys
 
-from cyclonedds.domain import DomainParticipant
 from cyclonedds.topic import Topic
 from cyclonedds.pub import Publisher, DataWriter
 
 import time
-import os
 import numpy as np
 
 from dds_utils import (
@@ -17,10 +16,13 @@ from dds_utils import (
     Location,
     ROS_TOPIC_AGENTS_TO_SUBSCRIBE,
     ROS_TOPIC_TRANSFORMATION_MATRIX,
+    RobotIdError,
     TransformMixin,
     best_effort_qos,
+    create_domain_participant,
+    dispose_participant,
     location_topic_name,
-    make_participant_qos,
+    require_robot_id_int,
 )
 
 from navigation_utils import StochOccupancyGrid2D
@@ -32,21 +34,22 @@ class LocationPublisher(TransformMixin):
 
         self.init_transform_state()
 
-        # Get robot ID, Hash, and IP Address
-        self.my_id = os.environ.get("ROBOT_ID")
-
-        qos_profile = make_participant_qos()
+        try:
+            self.my_id_int = require_robot_id_int()
+        except RobotIdError as exc:
+            rospy.logfatal("%s", exc)
+            sys.exit(1)
+        self.my_id = str(self.my_id_int)
 
         # Store current location in the local frame
         self.x = None
         self.y = None
         self.theta = None
 
-        # Create a DomainParticipant, Subscriber, and Publisher
-        self.participant = DomainParticipant(qos=qos_profile)
+        self.participant = create_domain_participant(domain_qos=True)
         self.publisher = Publisher(self.participant)
 
-        self.location_topic = Topic(self.participant, location_topic_name(self.my_id), Location)
+        self.location_topic = Topic(self.participant, location_topic_name(self.my_id_int), Location)
         self.location_writer = DataWriter(self.publisher, self.location_topic, qos=best_effort_qos)
 
         self.trans_listener = tf.TransformListener()
@@ -136,7 +139,7 @@ class LocationPublisher(TransformMixin):
         
         # Now publish the message the each agent
         for agent_id in self.agents_to_subscribe:
-            if agent_id != int(self.my_id):
+            if agent_id != self.my_id_int:
                 # Get the goal for the first agent
                 goal_x, goal_y = other_goals.pop(0)
 
@@ -149,7 +152,7 @@ class LocationPublisher(TransformMixin):
                 # Create DDS Data Message with goal
                 goal_message = DataMessage(
                     message_type="goal",
-                    sending_agent=int(self.my_id),
+                    sending_agent=self.my_id_int,
                     timestamp=int(time.time()),
                     data=json.dumps(message_converter.convert_ros_message_to_dictionary(msg))
                 )
@@ -177,7 +180,7 @@ class LocationPublisher(TransformMixin):
                 transformed_point = self.transform_point([x, y, theta])
                 x_new, y_new, theta_new = transformed_point
                 
-                location = Location(int(self.my_id), int(time.time()), x_new, y_new, theta_new, self.is_static)
+                location = Location(self.my_id_int, int(time.time()), x_new, y_new, theta_new, self.is_static)
                 self.location_writer.write(location)
 
             except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
@@ -189,6 +192,10 @@ class LocationPublisher(TransformMixin):
 
     def shutdown(self):
         rospy.loginfo("Shutting down DDS location publisher...")
+        self.location_writer = None
+        self.publisher = None
+        dispose_participant(self.participant)
+        self.participant = None
 
 
 if __name__ == "__main__":
