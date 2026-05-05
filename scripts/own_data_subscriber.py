@@ -119,6 +119,11 @@ class SelfDataListener(Listener, TransformMixin):
                 ext.coordinated = coordinated
                 ext.source_agent = int(sending_agent)
                 ext.target_agent = self.my_id_int
+                fleet = data.get("fleet_robot_ids")
+                if isinstance(fleet, list):
+                    ext.fleet_robot_ids = [int(x) for x in fleet]
+                else:
+                    ext.fleet_robot_ids = []
                 self.goal_multi_pub.publish(ext)
                 rospy.loginfo(
                     "Received multi_robot_goal from agent %s plan_id=%s",

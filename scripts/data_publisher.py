@@ -187,6 +187,7 @@ class DataPublisher(TransformMixin):
         """Fan out fleet goals to each peer's DataTopic; orchestrator's own id uses local ROS only."""
         my_id_int = self.my_id_int
         aid_sender = self._sender_id_optional()
+        fleet_ids = [int(e.robot_id) for e in msg.goals]
 
         for entry in msg.goals:
             rid = int(entry.robot_id)
@@ -206,6 +207,7 @@ class DataPublisher(TransformMixin):
                 out.coordinated = coordinated
                 out.source_agent = aid_sender
                 out.target_agent = rid
+                out.fleet_robot_ids = fleet_ids
                 self._pub_external_goal_multi_local.publish(out)
                 rospy.loginfo(
                     "dds_data_publisher: local multi-robot goal (self): plan_id=%s robot=%s",
@@ -221,6 +223,7 @@ class DataPublisher(TransformMixin):
                 "plan_id": plan_id,
                 "coordinated": bool(coordinated),
                 "target_agent": rid,
+                "fleet_robot_ids": fleet_ids,
             }
             dm = make_data_message(MSG_MULTI_ROBOT_GOAL, aid_sender, payload)
             writer = self._get_writer_for_target(rid)
