@@ -2,7 +2,7 @@ import rospy
 from rospy_message_converter import message_converter
 from mattbot_image_detection.msg import DetectedObject, DetectedObjectArray
 from mattbot_image_detection.msg import LabeledObject, LabeledObjectArray
-from mattbot_dds.msg import MultiRobotGoalPlan, MultiRobotExternalGoal
+from mattbot_dds.msg import MultiRobotGoalPlan, MultiRobotExternalGoal, MultiAgentPlannedPath
 from nav_msgs.msg import Path
 from geometry_msgs.msg import Pose2D
 from std_msgs.msg import Float32MultiArray, Float64MultiArray, Time as RosTimeMsg
@@ -16,6 +16,7 @@ from database_utils import RobotDatabase
 import sys
 import time
 import json
+import copy
 import numpy as np
 
 from dds_utils import (
@@ -27,6 +28,7 @@ from dds_utils import (
     MSG_INVALID_GOAL,
     MSG_LLM_DETECTED_OBJECT,
     MSG_MULTI_ROBOT_GOAL,
+    MSG_MULTI_AGENT_PLANNED_PATH,
     MSG_PATH,
     MSG_PERSON_DETECTED,
     MSG_STAR_ENCODER_STATE,
@@ -141,6 +143,21 @@ class DataPublisher(TransformMixin):
             self._multi_robot_goal_plan_topic,
             MSG_MULTI_ROBOT_GOAL,
             self._external_goal_multi_topic,
+        )
+
+        self._multi_agent_planned_path_topic = rospy.get_param(
+            "~multi_agent_planned_path_for_dds_topic", "/multi_agent_planned_path_for_dds"
+        ).strip() or "/multi_agent_planned_path_for_dds"
+        self._sub_multi_agent_planned_path = rospy.Subscriber(
+            self._multi_agent_planned_path_topic,
+            MultiAgentPlannedPath,
+            self.multi_agent_planned_path_callback,
+            queue_size=2,
+        )
+        rospy.loginfo(
+            "dds_data_publisher: multi-agent planned paths on %s -> DDS %s",
+            self._multi_agent_planned_path_topic,
+            MSG_MULTI_AGENT_PLANNED_PATH,
         )
 
     def _sender_id_optional(self):
@@ -310,6 +327,27 @@ class DataPublisher(TransformMixin):
             msg.poses[i].pose.position.y = new_point[1]
 
         self._publish_data(MSG_PATH, message_converter.convert_ros_message_to_dictionary(msg))
+
+    def multi_agent_planned_path_callback(self, msg):
+        """Forward planned path + plan_id to DDS (inter-robot frame, same as path_callback)."""
+        path_msg = copy.deepcopy(msg.path)
+        for i in range(len(path_msg.poses)):
+            x = path_msg.poses[i].pose.position.x
+            y = path_msg.poses[i].pose.position.y
+            new_point = self.transform_point([x, y, 0])
+            path_msg.poses[i].pose.position.x = new_point[0]
+            path_msg.poses[i].pose.position.y = new_point[1]
+        payload = {
+            "plan_id": msg.plan_id,
+            "path": message_converter.convert_ros_message_to_dictionary(path_msg),
+        }
+        self._publish_data(MSG_MULTI_AGENT_PLANNED_PATH, payload)
+        rospy.loginfo(
+            "dds_data_publisher: sent %s plan_id=%s poses=%d",
+            MSG_MULTI_AGENT_PLANNED_PATH,
+            msg.plan_id,
+            len(path_msg.poses),
+        )
 
     def voice_goal_callback(self, msg):
         x = msg.x

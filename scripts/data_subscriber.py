@@ -2,7 +2,7 @@ import rospy
 from rospy_message_converter import message_converter
 from mattbot_image_detection.msg import DetectedObject, DetectedObjectArray
 from geometry_msgs.msg import Pose
-from mattbot_dds.msg import AgentPath, MapUpdate
+from mattbot_dds.msg import AgentPath, MapUpdate, MultiAgentPlannedPath
 from nav_msgs.msg import Path
 from std_msgs.msg import Float32MultiArray, Float64MultiArray, Int16MultiArray, Time as RosTimeMsg
 from mattbot_image_detection.msg import FaceEncoding
@@ -25,6 +25,7 @@ from dds_utils import (
     MSG_GLOBAL_OBSERVE_START,
     MSG_MAP_UPDATE,
     MSG_PATH,
+    MSG_MULTI_AGENT_PLANNED_PATH,
     MSG_SENSOR_DETECTED_OBJECTS,
     MSG_STAR_ENCODER_STATE,
     MSG_STAR_GRU_OUT_EGO,
@@ -54,6 +55,7 @@ class DataListener(Listener, TransformMixin):
         object_publisher,
         object_sensor_publisher,
         path_publisher,
+        multi_agent_planned_path_publisher,
         map_update_publisher,
         face_encoding_publisher,
         global_observe_publisher=None,
@@ -65,6 +67,7 @@ class DataListener(Listener, TransformMixin):
         self.object_publisher = object_publisher
         self.object_sensor_publisher = object_sensor_publisher
         self.path_publisher = path_publisher
+        self.multi_agent_planned_path_publisher = multi_agent_planned_path_publisher
         self.map_update_publisher = map_update_publisher
         self.face_encoding_publisher = face_encoding_publisher
         self.global_observe_publisher = global_observe_publisher
@@ -162,6 +165,34 @@ class DataListener(Listener, TransformMixin):
                     self.path_publisher.publish(new_agent_path)
                     print("Received path from agent " + str(self.topic_id))
 
+                elif message_type == MSG_MULTI_AGENT_PLANNED_PATH:
+                    plan_id = data.get("plan_id", "")
+                    path_dict = data.get("path")
+                    if not isinstance(path_dict, dict):
+                        rospy.logwarn(
+                            "multi_agent_planned_path from agent %s: missing or invalid path dict",
+                            self.topic_id,
+                        )
+                        continue
+                    new_path = message_converter.convert_dictionary_to_ros_message("nav_msgs/Path", path_dict)
+                    for i in range(len(new_path.poses)):
+                        x = new_path.poses[i].pose.position.x
+                        y = new_path.poses[i].pose.position.y
+                        new_point = self.transform_point([x, y, 0], forward=False)
+                        new_path.poses[i].pose.position.x = new_point[0]
+                        new_path.poses[i].pose.position.y = new_point[1]
+                    out = MultiAgentPlannedPath()
+                    out.plan_id = plan_id
+                    out.source_agent = int(sending_agent)
+                    out.path = new_path
+                    self.multi_agent_planned_path_publisher.publish(out)
+                    rospy.loginfo(
+                        "dds_data_subscriber: multi_agent_planned_path from agent %s plan_id=%s poses=%d",
+                        self.topic_id,
+                        plan_id,
+                        len(new_path.poses),
+                    )
+
                 elif message_type == MSG_MAP_UPDATE:
                     map_update = message_converter.convert_dictionary_to_ros_message("mattbot_dds/MapUpdate", data)
 
@@ -251,6 +282,16 @@ class DataSubscriber(TransformMixin):
         self.object_publisher = rospy.Publisher("/object_from_agent", DetectedObject, queue_size=10)
         self.object_sensor_publisher = rospy.Publisher("/object_from_sensor", DetectedObjectArray, queue_size=10)
         self.path_publisher = rospy.Publisher("/path_from_agent", AgentPath, queue_size=10)
+        self._multi_agent_planned_path_from_agent_topic = rospy.get_param(
+            "~multi_agent_planned_path_from_agent_topic", "/multi_agent_planned_path_from_agent"
+        ).strip() or "/multi_agent_planned_path_from_agent"
+        self.multi_agent_planned_path_publisher = rospy.Publisher(
+            self._multi_agent_planned_path_from_agent_topic, MultiAgentPlannedPath, queue_size=10
+        )
+        rospy.loginfo(
+            "dds_data_subscriber: peer multi-agent planned paths -> %s",
+            self._multi_agent_planned_path_from_agent_topic,
+        )
         self.map_update_publisher = rospy.Publisher("/map_update", MapUpdate, queue_size=10)
         self.face_encoding_publisher = rospy.Publisher("/new_face_encoding", FaceEncoding, queue_size=10)
 
@@ -302,6 +343,7 @@ class DataSubscriber(TransformMixin):
                         self.object_publisher,
                         self.object_sensor_publisher,
                         self.path_publisher,
+                        self.multi_agent_planned_path_publisher,
                         self.map_update_publisher,
                         self.face_encoding_publisher,
                         global_observe_publisher=self.global_observe_publisher,

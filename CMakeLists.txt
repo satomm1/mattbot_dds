@@ -57,6 +57,7 @@ add_message_files(
   AgentPath.msg
   AgentLocation.msg
   MapUpdate.msg
+  MultiAgentPlannedPath.msg
   RobotGoalEntry.msg
   MultiRobotGoalPlan.msg
   MultiRobotExternalGoal.msg

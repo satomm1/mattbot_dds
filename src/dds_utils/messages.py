@@ -116,6 +116,8 @@ MSG_GLOBAL_OBSERVE_START = "global_observe_start"
 
 # Directed goals for fleet coordination
 MSG_MULTI_ROBOT_GOAL = "multi_robot_goal"
+# JSON: {"plan_id": str, "path": dict} — path is nav_msgs/Path via message_converter
+MSG_MULTI_AGENT_PLANNED_PATH = "multi_agent_planned_path"
 
 MSG_DETECTED_OBJECT = "detected_object"
 MSG_LLM_DETECTED_OBJECT = "llm_detected_object"
