@@ -7,6 +7,10 @@
     <arg name="global_observe_start_ros_topic" default="/global_observe_start"/>
     <arg name="global_observe_start_dds_trigger_topic" default="/global_observe_start_dds"/>
 
+    <arg name="forward_multi_agent_execute_at_via_dds" default="true"/>
+    <arg name="multi_agent_execute_at_dds_trigger_topic" default="/multi_agent_execute_at_dds"/>
+    <arg name="multi_agent_execute_at_ros_topic" default="/multi_agent_execute_at"/>
+
     <node name="agent_entry_exit" pkg="mattbot_dds" type="entry_exit.py" output="screen"/>
     <node name="heartbeat_publisher" pkg="mattbot_dds" type="heartbeat_publisher.py" output="screen"/>
     <node name="heartbeat_subscriber" pkg="mattbot_dds" type="heartbeat_subscriber.py" output="screen"/>
@@ -17,6 +21,9 @@
         <param name="sqlite" value="$(arg sqlite)"/>
         <param name="forward_global_observe_start_via_dds" value="$(arg forward_global_observe_start_via_dds)"/>
         <param name="global_observe_start_dds_trigger_topic" value="$(arg global_observe_start_dds_trigger_topic)"/>
+        <param name="forward_multi_agent_execute_at_via_dds" value="$(arg forward_multi_agent_execute_at_via_dds)"/>
+        <param name="multi_agent_execute_at_dds_trigger_topic" value="$(arg multi_agent_execute_at_dds_trigger_topic)"/>
+        <param name="multi_agent_execute_at_ros_topic" value="$(arg multi_agent_execute_at_ros_topic)"/>
     </node>
 
     <node name="data_subscriber" pkg="mattbot_dds" type="data_subscriber.py" output="screen">
@@ -27,5 +34,6 @@
 
     <node name="own_data_subscriber" pkg="mattbot_dds" type="own_data_subscriber.py" output="screen">
         <param name="sqlite" value="$(arg sqlite)"/>
+        <param name="multi_agent_execute_at_ros_topic" value="$(arg multi_agent_execute_at_ros_topic)"/>
     </node>
 </launch>

@@ -61,6 +61,7 @@ add_message_files(
   RobotGoalEntry.msg
   MultiRobotGoalPlan.msg
   MultiRobotExternalGoal.msg
+  MultiAgentExecuteAt.msg
 )
 
 ## Generate services in the 'srv' folder
@@ -181,6 +182,7 @@ catkin_install_python(PROGRAMS
   scripts/data_subscriber.py
   scripts/own_data_subscriber.py
   scripts/image_publisher.py
+  scripts/publish_multi_agent_execute_at.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

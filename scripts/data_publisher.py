@@ -2,7 +2,7 @@ import rospy
 from rospy_message_converter import message_converter
 from mattbot_image_detection.msg import DetectedObject, DetectedObjectArray
 from mattbot_image_detection.msg import LabeledObject, LabeledObjectArray
-from mattbot_dds.msg import MultiRobotGoalPlan, MultiRobotExternalGoal, MultiAgentPlannedPath
+from mattbot_dds.msg import MultiRobotGoalPlan, MultiRobotExternalGoal, MultiAgentPlannedPath, MultiAgentExecuteAt
 from nav_msgs.msg import Path
 from geometry_msgs.msg import Pose2D
 from std_msgs.msg import Float32MultiArray, Float64MultiArray, Time as RosTimeMsg
@@ -29,6 +29,7 @@ from dds_utils import (
     MSG_LLM_DETECTED_OBJECT,
     MSG_MULTI_ROBOT_GOAL,
     MSG_MULTI_AGENT_PLANNED_PATH,
+    MSG_MULTI_AGENT_EXECUTE_AT,
     MSG_PATH,
     MSG_PERSON_DETECTED,
     MSG_STAR_ENCODER_STATE,
@@ -160,6 +161,33 @@ class DataPublisher(TransformMixin):
             MSG_MULTI_AGENT_PLANNED_PATH,
         )
 
+        self._forward_multi_agent_execute_at = bool(
+            rospy.get_param("~forward_multi_agent_execute_at_via_dds", True)
+        )
+        self._multi_agent_execute_at_dds_trigger_topic = rospy.get_param(
+            "~multi_agent_execute_at_dds_trigger_topic", "/multi_agent_execute_at_dds"
+        ).strip() or "/multi_agent_execute_at_dds"
+        self._multi_agent_execute_at_ros_topic = rospy.get_param(
+            "~multi_agent_execute_at_ros_topic", "/multi_agent_execute_at"
+        ).strip() or "/multi_agent_execute_at"
+        self._pub_execute_at_local = rospy.Publisher(
+            self._multi_agent_execute_at_ros_topic, MultiAgentExecuteAt, queue_size=2, latch=True
+        )
+        self._sub_multi_agent_execute_at = None
+        if self._forward_multi_agent_execute_at:
+            self._sub_multi_agent_execute_at = rospy.Subscriber(
+                self._multi_agent_execute_at_dds_trigger_topic,
+                MultiAgentExecuteAt,
+                self.multi_agent_execute_at_callback,
+                queue_size=2,
+            )
+            rospy.loginfo(
+                "dds_data_publisher: forwarding %s to DDS %s (local echo -> %s)",
+                self._multi_agent_execute_at_dds_trigger_topic,
+                MSG_MULTI_AGENT_EXECUTE_AT,
+                self._multi_agent_execute_at_ros_topic,
+            )
+
     def _sender_id_optional(self):
         """Sending agent id for DDS messages that previously used 0 when ROBOT_ID was unset."""
         return self.my_id_int
@@ -245,6 +273,39 @@ class DataPublisher(TransformMixin):
                 {"sec": int(msg.data.secs), "nsec": int(msg.data.nsecs)},
             )
         )
+
+    def multi_agent_execute_at_callback(self, msg):
+        """Fan out synchronized execute time to each fleet robot's DataTopic; echo locally for orchestrator."""
+        aid = self._sender_id_optional()
+        fleet_ids = [int(x) for x in (msg.fleet_robot_ids or [])]
+        if not fleet_ids:
+            rospy.logwarn("dds_data_publisher: multi_agent_execute_at missing fleet_robot_ids; skipping DDS")
+            return
+        payload = {
+            "plan_id": str(msg.plan_id),
+            "sec": int(msg.execute_at.secs),
+            "nsec": int(msg.execute_at.nsecs),
+            "fleet_robot_ids": fleet_ids,
+        }
+        my_id_int = self.my_id_int
+        for rid in fleet_ids:
+            if rid == my_id_int:
+                self._pub_execute_at_local.publish(msg)
+                rospy.loginfo(
+                    "dds_data_publisher: local multi_agent_execute_at plan_id=%s execute_at=%s",
+                    msg.plan_id,
+                    msg.execute_at,
+                )
+                continue
+            dm = make_data_message(MSG_MULTI_AGENT_EXECUTE_AT, aid, payload)
+            self._get_writer_for_target(rid).write(dm)
+            rospy.loginfo(
+                "dds_data_publisher: sent %s to DataTopic%s plan_id=%s",
+                MSG_MULTI_AGENT_EXECUTE_AT,
+                rid,
+                msg.plan_id,
+            )
+            time.sleep(INTER_DDS_WRITE_SLEEP_S)
 
     def _star_encoder_callback(self, msg: Float32MultiArray):
         aid = self._sender_id_optional()

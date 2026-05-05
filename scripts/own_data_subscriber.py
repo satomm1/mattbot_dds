@@ -18,6 +18,7 @@ import numpy as np
 from dds_utils import (
     MSG_GOAL,
     MSG_MULTI_ROBOT_GOAL,
+    MSG_MULTI_AGENT_EXECUTE_AT,
     MSG_POSITION_INIT,
     MSG_SEND_UNKNOWN_IMAGES,
     MSG_STOP,
@@ -33,7 +34,7 @@ from dds_utils import (
     reliable_qos,
     require_robot_id_int,
 )
-from mattbot_dds.msg import MultiRobotExternalGoal
+from mattbot_dds.msg import MultiRobotExternalGoal, MultiAgentExecuteAt
 
 ##################################################
 # This script process data messages sent to this agent
@@ -58,6 +59,13 @@ class SelfDataListener(Listener, TransformMixin):
         self.goal_multi_pub = rospy.Publisher(
             self._external_goal_multi_topic, MultiRobotExternalGoal, queue_size=10, latch=False
         )
+        self._multi_agent_execute_at_ros_topic = rospy.get_param(
+            "~multi_agent_execute_at_ros_topic", "/multi_agent_execute_at"
+        ).strip() or "/multi_agent_execute_at"
+        self.multi_agent_execute_at_pub = rospy.Publisher(
+            self._multi_agent_execute_at_ros_topic, MultiAgentExecuteAt, queue_size=2, latch=True
+        )
+        rospy.loginfo("dds_own_data_subscriber: multi_agent_execute_at -> %s", self._multi_agent_execute_at_ros_topic)
         self.send_unknown_images_pub = rospy.Publisher("/send_unknown_images", UInt32, queue_size=10)
         self.init_pub = rospy.Publisher("/initialpose", PoseWithCovarianceStamped, queue_size=10)
 
@@ -136,6 +144,25 @@ class SelfDataListener(Listener, TransformMixin):
                     self.goal_pub.publish(g)
                 if self.db is not None:
                     self.db.add_goal(self.my_id, x, y, theta, timestamp)
+            elif message_type == MSG_MULTI_AGENT_EXECUTE_AT:
+                plan_id = data.get("plan_id", "")
+                sec, nsec = data.get("sec"), data.get("nsec")
+                if sec is None or nsec is None:
+                    rospy.logwarn("multi_agent_execute_at: missing sec/nsec from agent %s", sending_agent)
+                    continue
+                fleet = data.get("fleet_robot_ids")
+                fleet_ids = [int(x) for x in fleet] if isinstance(fleet, list) else []
+                ext = MultiAgentExecuteAt()
+                ext.plan_id = str(plan_id)
+                ext.execute_at = rospy.Time(int(sec), int(nsec))
+                ext.fleet_robot_ids = fleet_ids
+                self.multi_agent_execute_at_pub.publish(ext)
+                rospy.loginfo(
+                    "dds_own_data_subscriber: multi_agent_execute_at from agent %s plan_id=%s execute_at=%s",
+                    sending_agent,
+                    plan_id,
+                    ext.execute_at,
+                )
             elif message_type == MSG_POSITION_INIT:
                 # Transform the position to this occupancy grid
                 x, y, theta = self.transform_point([data["x"], data["y"], data["theta"]], forward=False)
