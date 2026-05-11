@@ -19,6 +19,7 @@ from dds_utils import (
     MSG_GOAL,
     MSG_MULTI_ROBOT_GOAL,
     MSG_MULTI_AGENT_EXECUTE_AT,
+    MSG_MULTI_AGENT_TIMING_SOLVE,
     MSG_POSITION_INIT,
     MSG_SEND_UNKNOWN_IMAGES,
     MSG_STOP,
@@ -34,7 +35,7 @@ from dds_utils import (
     reliable_qos,
     require_robot_id_int,
 )
-from mattbot_dds.msg import MultiRobotExternalGoal, MultiAgentExecuteAt
+from mattbot_dds.msg import MultiRobotExternalGoal, MultiAgentExecuteAt, MultiAgentTimingSolve
 
 ##################################################
 # This script process data messages sent to this agent
@@ -66,6 +67,13 @@ class SelfDataListener(Listener, TransformMixin):
             self._multi_agent_execute_at_ros_topic, MultiAgentExecuteAt, queue_size=2, latch=True
         )
         rospy.loginfo("dds_own_data_subscriber: multi_agent_execute_at -> %s", self._multi_agent_execute_at_ros_topic)
+        self._multi_agent_timing_solve_ros_topic = rospy.get_param(
+            "~multi_agent_timing_solve_ros_topic", "/multi_agent_timing_solve"
+        ).strip() or "/multi_agent_timing_solve"
+        self.multi_agent_timing_solve_pub = rospy.Publisher(
+            self._multi_agent_timing_solve_ros_topic, MultiAgentTimingSolve, queue_size=2, latch=False
+        )
+        rospy.loginfo("dds_own_data_subscriber: multi_agent_timing_solve -> %s", self._multi_agent_timing_solve_ros_topic)
         self.send_unknown_images_pub = rospy.Publisher("/send_unknown_images", UInt32, queue_size=10)
         self.init_pub = rospy.Publisher("/initialpose", PoseWithCovarianceStamped, queue_size=10)
 
@@ -162,6 +170,31 @@ class SelfDataListener(Listener, TransformMixin):
                     sending_agent,
                     plan_id,
                     ext.execute_at,
+                )
+            elif message_type == MSG_MULTI_AGENT_TIMING_SOLVE:
+                plan_id = data.get("plan_id", "")
+                src = data.get("source_agent")
+                if src is None:
+                    rospy.logwarn("multi_agent_timing_solve: missing source_agent from agent %s", sending_agent)
+                    continue
+                fleet = data.get("fleet_robot_ids")
+                fleet_ids = [int(x) for x in fleet] if isinstance(fleet, list) else []
+                wc = data.get("waypoint_counts")
+                counts = [int(x) for x in wc] if isinstance(wc, list) else []
+                wtf = data.get("waypoint_times_flat")
+                flat = [float(x) for x in wtf] if isinstance(wtf, list) else []
+                out = MultiAgentTimingSolve()
+                out.plan_id = str(plan_id)
+                out.source_agent = int(src)
+                out.fleet_robot_ids = fleet_ids
+                out.waypoint_counts = counts
+                out.waypoint_times_flat = flat
+                self.multi_agent_timing_solve_pub.publish(out)
+                rospy.loginfo(
+                    "dds_own_data_subscriber: multi_agent_timing_solve from agent %s plan_id=%s source=%s",
+                    sending_agent,
+                    plan_id,
+                    out.source_agent,
                 )
             elif message_type == MSG_POSITION_INIT:
                 # Transform the position to this occupancy grid

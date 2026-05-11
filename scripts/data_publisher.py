@@ -2,7 +2,13 @@ import rospy
 from rospy_message_converter import message_converter
 from mattbot_image_detection.msg import DetectedObject, DetectedObjectArray
 from mattbot_image_detection.msg import LabeledObject, LabeledObjectArray
-from mattbot_dds.msg import MultiRobotGoalPlan, MultiRobotExternalGoal, MultiAgentPlannedPath, MultiAgentExecuteAt
+from mattbot_dds.msg import (
+    MultiRobotGoalPlan,
+    MultiRobotExternalGoal,
+    MultiAgentPlannedPath,
+    MultiAgentExecuteAt,
+    MultiAgentTimingSolve,
+)
 from nav_msgs.msg import Path
 from geometry_msgs.msg import Pose2D
 from std_msgs.msg import Float32MultiArray, Float64MultiArray, Time as RosTimeMsg
@@ -30,6 +36,7 @@ from dds_utils import (
     MSG_MULTI_ROBOT_GOAL,
     MSG_MULTI_AGENT_PLANNED_PATH,
     MSG_MULTI_AGENT_EXECUTE_AT,
+    MSG_MULTI_AGENT_TIMING_SOLVE,
     MSG_PATH,
     MSG_PERSON_DETECTED,
     MSG_STAR_ENCODER_STATE,
@@ -188,6 +195,33 @@ class DataPublisher(TransformMixin):
                 self._multi_agent_execute_at_ros_topic,
             )
 
+        self._forward_multi_agent_timing_solve = bool(
+            rospy.get_param("~forward_multi_agent_timing_solve_via_dds", True)
+        )
+        self._multi_agent_timing_solve_for_dds_topic = rospy.get_param(
+            "~multi_agent_timing_solve_for_dds_topic", "/multi_agent_timing_solve_for_dds"
+        ).strip() or "/multi_agent_timing_solve_for_dds"
+        self._multi_agent_timing_solve_ros_topic = rospy.get_param(
+            "~multi_agent_timing_solve_ros_topic", "/multi_agent_timing_solve"
+        ).strip() or "/multi_agent_timing_solve"
+        self._pub_timing_solve_local = rospy.Publisher(
+            self._multi_agent_timing_solve_ros_topic, MultiAgentTimingSolve, queue_size=2, latch=False
+        )
+        self._sub_multi_agent_timing_solve = None
+        if self._forward_multi_agent_timing_solve:
+            self._sub_multi_agent_timing_solve = rospy.Subscriber(
+                self._multi_agent_timing_solve_for_dds_topic,
+                MultiAgentTimingSolve,
+                self.multi_agent_timing_solve_callback,
+                queue_size=2,
+            )
+            rospy.loginfo(
+                "dds_data_publisher: forwarding %s to DDS %s (local echo -> %s)",
+                self._multi_agent_timing_solve_for_dds_topic,
+                MSG_MULTI_AGENT_TIMING_SOLVE,
+                self._multi_agent_timing_solve_ros_topic,
+            )
+
     def _sender_id_optional(self):
         """Sending agent id for DDS messages that previously used 0 when ROBOT_ID was unset."""
         return self.my_id_int
@@ -261,6 +295,40 @@ class DataPublisher(TransformMixin):
                 MSG_MULTI_ROBOT_GOAL,
                 rid,
                 plan_id,
+            )
+            time.sleep(INTER_DDS_WRITE_SLEEP_S)
+
+    def multi_agent_timing_solve_callback(self, msg):
+        """Fan out MILP timing result to each fleet robot's DataTopic; echo locally for coordinator."""
+        aid = self._sender_id_optional()
+        fleet_ids = [int(x) for x in (msg.fleet_robot_ids or [])]
+        if not fleet_ids:
+            rospy.logwarn("dds_data_publisher: multi_agent_timing_solve missing fleet_robot_ids; skipping DDS")
+            return
+        payload = {
+            "plan_id": str(msg.plan_id),
+            "source_agent": int(msg.source_agent),
+            "fleet_robot_ids": fleet_ids,
+            "waypoint_counts": [int(x) for x in (msg.waypoint_counts or [])],
+            "waypoint_times_flat": [float(x) for x in (msg.waypoint_times_flat or [])],
+        }
+        my_id_int = self.my_id_int
+        for rid in fleet_ids:
+            if rid == my_id_int:
+                self._pub_timing_solve_local.publish(msg)
+                rospy.loginfo(
+                    "dds_data_publisher: local multi_agent_timing_solve plan_id=%s source=%s",
+                    msg.plan_id,
+                    msg.source_agent,
+                )
+                continue
+            dm = make_data_message(MSG_MULTI_AGENT_TIMING_SOLVE, aid, payload)
+            self._get_writer_for_target(rid).write(dm)
+            rospy.loginfo(
+                "dds_data_publisher: sent %s to DataTopic%s plan_id=%s",
+                MSG_MULTI_AGENT_TIMING_SOLVE,
+                rid,
+                msg.plan_id,
             )
             time.sleep(INTER_DDS_WRITE_SLEEP_S)
 
