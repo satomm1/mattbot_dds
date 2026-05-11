@@ -122,6 +122,8 @@ MSG_MULTI_AGENT_PLANNED_PATH = "multi_agent_planned_path"
 MSG_MULTI_AGENT_EXECUTE_AT = "multi_agent_execute_at"
 # JSON: plan_id, source_agent, fleet_robot_ids, waypoint_counts, waypoint_times_flat
 MSG_MULTI_AGENT_TIMING_SOLVE = "multi_agent_timing_solve"
+# JSON: robot_id, plan_id, active, sec/nsec execute_at, path dict, waypoint_times, dds_forward_robot_ids
+MSG_MULTI_AGENT_ACTIVE_TRAJECTORY = "multi_agent_active_trajectory"
 
 MSG_DETECTED_OBJECT = "detected_object"
 MSG_LLM_DETECTED_OBJECT = "llm_detected_object"

@@ -8,6 +8,7 @@ from mattbot_dds.msg import (
     MultiAgentPlannedPath,
     MultiAgentExecuteAt,
     MultiAgentTimingSolve,
+    MultiAgentActiveTrajectory,
 )
 from nav_msgs.msg import Path
 from geometry_msgs.msg import Pose2D
@@ -37,6 +38,7 @@ from dds_utils import (
     MSG_MULTI_AGENT_PLANNED_PATH,
     MSG_MULTI_AGENT_EXECUTE_AT,
     MSG_MULTI_AGENT_TIMING_SOLVE,
+    MSG_MULTI_AGENT_ACTIVE_TRAJECTORY,
     MSG_PATH,
     MSG_PERSON_DETECTED,
     MSG_STAR_ENCODER_STATE,
@@ -222,6 +224,33 @@ class DataPublisher(TransformMixin):
                 self._multi_agent_timing_solve_ros_topic,
             )
 
+        self._forward_multi_agent_active_traj = bool(
+            rospy.get_param("~forward_multi_agent_active_trajectory_via_dds", True)
+        )
+        self._multi_agent_active_traj_for_dds_topic = rospy.get_param(
+            "~multi_agent_active_trajectory_for_dds_topic", "/multi_agent_active_trajectory_for_dds"
+        ).strip() or "/multi_agent_active_trajectory_for_dds"
+        self._multi_agent_active_traj_ros_topic = rospy.get_param(
+            "~multi_agent_active_trajectory_ros_topic", "/multi_agent_active_trajectory"
+        ).strip() or "/multi_agent_active_trajectory"
+        self._pub_active_traj_local = rospy.Publisher(
+            self._multi_agent_active_traj_ros_topic, MultiAgentActiveTrajectory, queue_size=2, latch=False
+        )
+        self._sub_multi_agent_active_traj = None
+        if self._forward_multi_agent_active_traj:
+            self._sub_multi_agent_active_traj = rospy.Subscriber(
+                self._multi_agent_active_traj_for_dds_topic,
+                MultiAgentActiveTrajectory,
+                self.multi_agent_active_trajectory_callback,
+                queue_size=2,
+            )
+            rospy.loginfo(
+                "dds_data_publisher: forwarding %s to DDS %s (local echo -> %s)",
+                self._multi_agent_active_traj_for_dds_topic,
+                MSG_MULTI_AGENT_ACTIVE_TRAJECTORY,
+                self._multi_agent_active_traj_ros_topic,
+            )
+
     def _sender_id_optional(self):
         """Sending agent id for DDS messages that previously used 0 when ROBOT_ID was unset."""
         return self.my_id_int
@@ -329,6 +358,50 @@ class DataPublisher(TransformMixin):
                 MSG_MULTI_AGENT_TIMING_SOLVE,
                 rid,
                 msg.plan_id,
+            )
+            time.sleep(INTER_DDS_WRITE_SLEEP_S)
+
+    def multi_agent_active_trajectory_callback(self, msg):
+        """Fan out active trajectory snapshot; echo locally. Empty dds_forward_robot_ids -> local only."""
+        aid = self._sender_id_optional()
+        path_dict = message_converter.convert_ros_message_to_dictionary(msg.path)
+        payload = {
+            "robot_id": int(msg.robot_id),
+            "plan_id": str(msg.plan_id),
+            "active": bool(msg.active),
+            "sec": int(msg.execute_at.secs),
+            "nsec": int(msg.execute_at.nsecs),
+            "path": path_dict,
+            "waypoint_times": [float(x) for x in (msg.waypoint_times or [])],
+            "dds_forward_robot_ids": [int(x) for x in (msg.dds_forward_robot_ids or [])],
+        }
+        my_id_int = self.my_id_int
+        forward = [int(x) for x in (msg.dds_forward_robot_ids or [])]
+        if not forward:
+            self._pub_active_traj_local.publish(msg)
+            rospy.loginfo(
+                "dds_data_publisher: local multi_agent_active_trajectory robot=%s plan_id=%s active=%s",
+                msg.robot_id,
+                msg.plan_id,
+                msg.active,
+            )
+            return
+        for rid in forward:
+            if rid == my_id_int:
+                self._pub_active_traj_local.publish(msg)
+                rospy.loginfo(
+                    "dds_data_publisher: local multi_agent_active_trajectory robot=%s plan_id=%s",
+                    msg.robot_id,
+                    msg.plan_id,
+                )
+                continue
+            dm = make_data_message(MSG_MULTI_AGENT_ACTIVE_TRAJECTORY, aid, payload)
+            self._get_writer_for_target(rid).write(dm)
+            rospy.loginfo(
+                "dds_data_publisher: sent %s to DataTopic%s robot=%s",
+                MSG_MULTI_AGENT_ACTIVE_TRAJECTORY,
+                rid,
+                msg.robot_id,
             )
             time.sleep(INTER_DDS_WRITE_SLEEP_S)
 

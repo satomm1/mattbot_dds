@@ -1,6 +1,7 @@
 import rospy
 import tf
 import sys
+from rospy_message_converter import message_converter
 from geometry_msgs.msg import Pose2D, PoseWithCovarianceStamped
 from std_msgs.msg import Bool, Float64MultiArray, UInt32
 
@@ -20,6 +21,7 @@ from dds_utils import (
     MSG_MULTI_ROBOT_GOAL,
     MSG_MULTI_AGENT_EXECUTE_AT,
     MSG_MULTI_AGENT_TIMING_SOLVE,
+    MSG_MULTI_AGENT_ACTIVE_TRAJECTORY,
     MSG_POSITION_INIT,
     MSG_SEND_UNKNOWN_IMAGES,
     MSG_STOP,
@@ -35,7 +37,12 @@ from dds_utils import (
     reliable_qos,
     require_robot_id_int,
 )
-from mattbot_dds.msg import MultiRobotExternalGoal, MultiAgentExecuteAt, MultiAgentTimingSolve
+from mattbot_dds.msg import (
+    MultiRobotExternalGoal,
+    MultiAgentExecuteAt,
+    MultiAgentTimingSolve,
+    MultiAgentActiveTrajectory,
+)
 
 ##################################################
 # This script process data messages sent to this agent
@@ -74,6 +81,16 @@ class SelfDataListener(Listener, TransformMixin):
             self._multi_agent_timing_solve_ros_topic, MultiAgentTimingSolve, queue_size=2, latch=False
         )
         rospy.loginfo("dds_own_data_subscriber: multi_agent_timing_solve -> %s", self._multi_agent_timing_solve_ros_topic)
+        self._multi_agent_active_traj_ros_topic = rospy.get_param(
+            "~multi_agent_active_trajectory_ros_topic", "/multi_agent_active_trajectory"
+        ).strip() or "/multi_agent_active_trajectory"
+        self.multi_agent_active_traj_pub = rospy.Publisher(
+            self._multi_agent_active_traj_ros_topic, MultiAgentActiveTrajectory, queue_size=2, latch=False
+        )
+        rospy.loginfo(
+            "dds_own_data_subscriber: multi_agent_active_trajectory -> %s",
+            self._multi_agent_active_traj_ros_topic,
+        )
         self.send_unknown_images_pub = rospy.Publisher("/send_unknown_images", UInt32, queue_size=10)
         self.init_pub = rospy.Publisher("/initialpose", PoseWithCovarianceStamped, queue_size=10)
 
@@ -195,6 +212,45 @@ class SelfDataListener(Listener, TransformMixin):
                     sending_agent,
                     plan_id,
                     out.source_agent,
+                )
+            elif message_type == MSG_MULTI_AGENT_ACTIVE_TRAJECTORY:
+                rid = data.get("robot_id")
+                if rid is None:
+                    rospy.logwarn("multi_agent_active_trajectory: missing robot_id from agent %s", sending_agent)
+                    continue
+                sec, nsec = data.get("sec"), data.get("nsec")
+                if sec is None or nsec is None:
+                    rospy.logwarn("multi_agent_active_trajectory: missing execute_at from agent %s", sending_agent)
+                    continue
+                path_dict = data.get("path")
+                if not isinstance(path_dict, dict):
+                    rospy.logwarn("multi_agent_active_trajectory: invalid path from agent %s", sending_agent)
+                    continue
+                new_path = message_converter.convert_dictionary_to_ros_message("nav_msgs/Path", path_dict)
+                for i in range(len(new_path.poses)):
+                    x = new_path.poses[i].pose.position.x
+                    y = new_path.poses[i].pose.position.y
+                    new_point = self.transform_point([x, y, 0], forward=False)
+                    new_path.poses[i].pose.position.x = new_point[0]
+                    new_path.poses[i].pose.position.y = new_point[1]
+                wtf = data.get("waypoint_times")
+                flat = [float(x) for x in wtf] if isinstance(wtf, list) else []
+                fwd = data.get("dds_forward_robot_ids")
+                forward_ids = [int(x) for x in fwd] if isinstance(fwd, list) else []
+                out = MultiAgentActiveTrajectory()
+                out.robot_id = int(rid)
+                out.plan_id = str(data.get("plan_id", ""))
+                out.active = bool(data.get("active", True))
+                out.execute_at = rospy.Time(int(sec), int(nsec))
+                out.path = new_path
+                out.waypoint_times = flat
+                out.dds_forward_robot_ids = forward_ids
+                self.multi_agent_active_traj_pub.publish(out)
+                rospy.loginfo(
+                    "dds_own_data_subscriber: multi_agent_active_trajectory from agent %s robot_id=%s active=%s",
+                    sending_agent,
+                    out.robot_id,
+                    out.active,
                 )
             elif message_type == MSG_POSITION_INIT:
                 # Transform the position to this occupancy grid

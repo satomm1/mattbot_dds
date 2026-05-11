@@ -63,6 +63,7 @@ add_message_files(
   MultiRobotExternalGoal.msg
   MultiAgentExecuteAt.msg
   MultiAgentTimingSolve.msg
+  MultiAgentActiveTrajectory.msg
 )
 
 ## Generate services in the 'srv' folder
