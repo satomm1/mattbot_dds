@@ -186,7 +186,7 @@ class DataListener(Listener, TransformMixin):
                     out.source_agent = int(sending_agent)
                     out.path = new_path
                     self.multi_agent_planned_path_publisher.publish(out)
-                    rospy.loginfo(
+                    rospy.logdebug(
                         "dds_data_subscriber: multi_agent_planned_path from agent %s plan_id=%s poses=%d",
                         self.topic_id,
                         plan_id,
@@ -289,7 +289,7 @@ class DataSubscriber(TransformMixin):
             self._multi_agent_planned_path_from_agent_topic, MultiAgentPlannedPath, queue_size=10
         )
         rospy.loginfo(
-            "dds_data_subscriber: peer multi-agent planned paths -> %s",
+            "dds_data_subscriber: peer multi_agent_planned_path -> %s",
             self._multi_agent_planned_path_from_agent_topic,
         )
         self.map_update_publisher = rospy.Publisher("/map_update", MapUpdate, queue_size=10)
