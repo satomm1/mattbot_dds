@@ -32,7 +32,7 @@
         <param name="global_observe_start_ros_topic" value="$(arg global_observe_start_ros_topic)"/>
     </node>
 
-    <node name="own_data_subscriber" pkg="mattbot_dds" type="own_data_subscriber.py" output="screen">
+    <node name="own_data_subscriber" pkg="mattbot_dds" type="own_data_subscriber.py" output="screen" required="true">
         <param name="sqlite" value="$(arg sqlite)"/>
         <param name="multi_agent_execute_at_ros_topic" value="$(arg multi_agent_execute_at_ros_topic)"/>
     </node>

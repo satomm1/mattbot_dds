@@ -23,6 +23,7 @@ from dds_utils import (
     MSG_MULTI_AGENT_TIMING_SOLVE,
     MSG_MULTI_AGENT_ACTIVE_TRAJECTORY,
     MSG_POSITION_INIT,
+    MSG_ROBOT_SHUTDOWN,
     MSG_SEND_UNKNOWN_IMAGES,
     MSG_STOP,
     DataMessage,
@@ -96,6 +97,7 @@ class SelfDataListener(Listener, TransformMixin):
 
         self._stop_topic = rospy.get_param("~stop_ros_topic", "/stop").strip() or "/stop"
         self._stop_pub = rospy.Publisher(self._stop_topic, Bool, queue_size=1, latch=False)
+        self._allow_dds_roslaunch_shutdown = bool(rospy.get_param("~allow_dds_roslaunch_shutdown", True))
 
         # Database connection
         self.db = sqlite_db
@@ -314,6 +316,26 @@ class SelfDataListener(Listener, TransformMixin):
                     self._stop_topic,
                 )
                 self._stop_pub.publish(Bool(data=True))
+
+            elif message_type == MSG_ROBOT_SHUTDOWN:
+                if not self._allow_dds_roslaunch_shutdown:
+                    rospy.logwarn(
+                        "dds_own_data_subscriber: ignoring robot_shutdown from agent %s (allow_dds_roslaunch_shutdown is false)",
+                        sending_agent,
+                    )
+                    continue
+                reason = data.get("reason") if isinstance(data, dict) else None
+                extra = " reason=%r" % (reason,) if reason else ""
+                rospy.logwarn(
+                    "dds_own_data_subscriber: robot_shutdown from agent %s ts=%s payload=%s%s; signaling rospy shutdown",
+                    sending_agent,
+                    timestamp,
+                    data,
+                    extra,
+                )
+                rospy.signal_shutdown(
+                    "dds robot_shutdown from agent %s%s" % (sending_agent, extra)
+                )
 
 
 class OwnDataSubscriber(TransformMixin):

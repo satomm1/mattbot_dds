@@ -12,7 +12,7 @@ Fleet traffic uses per-agent DDS topics named `DataTopic{agent_id}` (`dds_utils.
 
 | Path | DDS reader | Typical `sending_agent` | Purpose |
 |------|------------|-------------------------|---------|
-| **Directed to this robot** | `own_data_subscriber.py` on **your** `DataTopic{ROBOT_ID}` | Orchestrator / another robot (not self) | Goals, multi-robot goals, position init, unknown-image requests, **human stop** (`MSG_STOP`) |
+| **Directed to this robot** | `own_data_subscriber.py` on **your** `DataTopic{ROBOT_ID}` | Orchestrator / another robot (not self) | Goals, multi-robot goals, position init, unknown-image requests, **human stop** (`MSG_STOP`), **full stack shutdown** (`MSG_ROBOT_SHUTDOWN`) |
 | **Peer telemetry** | `data_subscriber.py` on **each peer’s** `DataTopic{peer_id}` (from `/agents_to_subscribe`) | Must equal that **peer’s** id | Objects, paths, map updates, face encodings, STAR tensors, relayed `global_observe_start`, etc. |
 
 Orchestrators (e.g. a central `goal_publisher` that consumes GraphQL) write `DataMessage` samples **onto the target robot’s** `DataTopic{rid}`. Those samples are **not** visible to `data_subscriber.py`’s peer-only pattern; they are handled by **`own_data_subscriber.py`**.
@@ -29,6 +29,19 @@ When a `DataMessage` with `message_type == "stop"` arrives on this robot’s dat
 - **Downstream:** e.g. `mattbot_navigation` `localize_and_navigate2.py` subscribes to `~/stop_topic` (default `/stop`) and transitions to **IDLE** with zero `cmd_vel` when stopping. Keep these topic names aligned in launch files if you override them.
 
 Constant: `MSG_STOP` in `src/dds_utils/messages.py` (re-exported from `dds_utils`).
+
+---
+
+## Fleet shutdown → end `roslaunch` (graceful stack teardown)
+
+When a `DataMessage` with `message_type == "robot_shutdown"` (`MSG_ROBOT_SHUTDOWN`) arrives on this robot’s `DataTopic{ROBOT_ID}`, **`own_data_subscriber.py`** calls `rospy.signal_shutdown(...)`, the node process exits, and because **`own_data_subscriber` is launched with `required="true"`** in [`launch/dds.launch`](launch/dds.launch), `roslaunch` tears down the other nodes in that session (e.g. `mattbot_bringup` `short.launch` / `tall.launch` which include `dds.launch`).
+
+- **Wire format:** same `DataMessage` as other directed traffic; `data` is JSON (often `{}` or `{"reason": "..."}`).
+- **Param:** `~allow_dds_roslaunch_shutdown` on `dds_own_data_subscriber` (default **true**). Set to **false** on a dev machine if you must receive samples without ending the launch.
+- **Security:** any writer that can publish to this robot’s `DataTopic{ROBOT_ID}` can trigger a full shutdown when the param is true—same trust model as fleet stop (`MSG_STOP`).
+- **Fleet / orchestrator:** publish to **`DataTopic{target_robot_id}`** with `message_type` `"robot_shutdown"`; see [dds_robot_platform](https://github.com/satomm1/dds_robot_platform) for the reference fleet stack.
+
+This is separate from **`MSG_STOP`**, which only publishes **`/stop`** and does not exit the process.
 
 ---
 
@@ -65,7 +78,7 @@ Agents must subscribe to the shared ROS transform (`transformation_matrix` / `/t
 | `location_subscriber.py` | `location_subscriber` | Other agents’ poses → ROS |
 | `data_publisher.py` | `dds_data_publisher` | ROS → DDS: objects, paths, goals, invalid goals, faces, multi-robot plans, optional STAR tensors, optional `global_observe_start` forwarding |
 | `data_subscriber.py` | `dds_data_subscriber` | DDS (peers) → ROS: e.g. `/object_from_agent`, `/object_from_sensor`, `/path_from_agent`, `/map_update`, `/new_face_encoding`, `/team/dds/...`, latched global observe relay |
-| `own_data_subscriber.py` | `dds_own_data_subscriber` | DDS (**this** `DataTopic`) → ROS: `/external_goal`, `/external_goal_multi`, `/initialpose`, `/send_unknown_images`, **`/stop`** |
+| `own_data_subscriber.py` | `dds_own_data_subscriber` | DDS (**this** `DataTopic`) → ROS: `/external_goal`, `/external_goal_multi`, `/initialpose`, `/send_unknown_images`, **`/stop`**; optional **`robot_shutdown`** → `rospy.signal_shutdown` (required node) |
 | `image_publisher.py` | (not in `dds.launch` by default) | Image DDS bridge when you run it explicitly |
 
 Deprecated and test helpers live under `scripts/deprecated/` and `scripts/testing/`.

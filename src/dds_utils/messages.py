@@ -132,6 +132,8 @@ MSG_SENSOR_DETECTED_OBJECTS = "sensor_detected_objects"
 MSG_PATH = "path"
 MSG_GOAL = "goal"
 MSG_STOP = "stop"
+# JSON optional: {"reason": str, ...} — full roslaunch teardown when handled by own_data_subscriber (required node).
+MSG_ROBOT_SHUTDOWN = "robot_shutdown"
 MSG_INVALID_GOAL = "invalid_goal"
 MSG_FACE_ENCODING = "face_encoding"
 MSG_MAP_UPDATE = "map_update"
