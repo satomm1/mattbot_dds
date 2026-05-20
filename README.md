@@ -26,7 +26,7 @@ Orchestrators (e.g. a central `goal_publisher` that consumes GraphQL) write `Dat
 When a `DataMessage` with `message_type == "stop"` arrives on this robot’s data topic (JSON payload often includes `"source": "human"`), **`own_data_subscriber.py`** publishes `std_msgs/Bool` **`data: true`** on ROS (default topic **`/stop`**).
 
 - **Publisher param:** `~stop_ros_topic` (default `/stop`) on node `dds_own_data_subscriber`.
-- **Downstream:** e.g. `mattbot_navigation` `localize_and_navigate2.py` subscribes to `~/stop_topic` (default `/stop`) and transitions to **IDLE** with zero `cmd_vel` when stopping. Keep these topic names aligned in launch files if you override them.
+- **Downstream:** e.g. `mattbot_navigation` `localize_and_navigate.py` subscribes to `~/stop_topic` (default `/stop`) and transitions to **IDLE** with zero `cmd_vel` when stopping. Keep these topic names aligned in launch files if you override them.
 
 Constant: `MSG_STOP` in `src/dds_utils/messages.py` (re-exported from `dds_utils`).
 
