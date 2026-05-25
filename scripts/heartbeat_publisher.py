@@ -79,7 +79,7 @@ class HeartbeatPublisher(TransformMixin):
 
             # Publish the heartbeat message
             self.heartbeat_writer.write(heartbeat)
-            print("Heartbeat sent")
+            # print("Heartbeat sent")
 
             # Sleep for HEARTBEAT_PERIOD seconds
             rospy.sleep(HEARTBEAT_PERIOD)
