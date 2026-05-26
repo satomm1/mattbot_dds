@@ -10,6 +10,7 @@ from cyclonedds.pub import Publisher, DataWriter
 from dds_utils import (
     DEFAULT_AGENT_TYPE,
     HEARTBEAT_PERIOD,
+    HEARTBEAT_STARTUP_DELAY_S,
     HEARTBEAT_TOPIC,
     Heartbeat,
     ROS_TOPIC_TRANSFORMATION_MATRIX_ABS,
@@ -94,6 +95,8 @@ class HeartbeatPublisher(TransformMixin):
 
 if __name__ == "__main__":
     heartbeat_publisher = HeartbeatPublisher()
-    time.sleep(11)
+    startup_delay = rospy.get_param("~startup_delay", HEARTBEAT_STARTUP_DELAY_S)
+    rospy.loginfo("Waiting %.1fs before publishing heartbeats (entry_exit join window)", startup_delay)
+    time.sleep(startup_delay)
     rospy.on_shutdown(heartbeat_publisher.shutdown)
     heartbeat_publisher.run()

@@ -20,9 +20,12 @@ from dds_utils import (
     DEFAULT_AGENT_TYPE,
     ENTRY_EXIT_TOPIC,
     HEARTBEAT_PERIOD,
+    INIT_DISCOVERY_GRACE_S,
     INIT_MAX_RETRIES,
     INIT_RECENT_THRESHOLD_S,
+    INIT_RETRY_SLEEP_S,
     INITIALIZATION_TOPIC,
+    INTER_DDS_WRITE_SLEEP_S,
     EntryExit,
     Initialization,
     ROS_TOPIC_AGENTS_TO_SUBSCRIBE,
@@ -37,10 +40,10 @@ from dds_utils import (
     TransformMixin,
     create_domain_participant,
     dispose_participant,
+    entry_init_reliable_qos,
     get_local_ip,
     hash_robot_id,
     pack_transform_msg,
-    reliable_qos,
     require_robot_id_int,
 )
 
@@ -108,10 +111,11 @@ class EntryExitListener(Listener):
 
         self.agents = dict()
         self.exited_agents = dict()
-        self.agents[my_hash] = {
+        self.agents[my_id_int] = {
             "agent_type": DEFAULT_AGENT_TYPE,
             "ip_address": my_ip,
             "hash": my_hash,
+            "timestamp": int(time.time()),
         }
 
         self.my_id = my_id
@@ -123,8 +127,13 @@ class EntryExitListener(Listener):
         self.map_md_msg = MapMetaData()
         self.known_points = []
         self.init_writer = init_writer
+        self.ready_to_welcome = False
 
         self.update_to_agents = False
+
+    def set_ready_to_welcome(self, ready):
+        """When False, ignore enter requests until local setup has finished."""
+        self.ready_to_welcome = ready
 
     def on_data_available(self, reader):
         """
@@ -144,15 +153,14 @@ class EntryExitListener(Listener):
 
             # Determine if entry or exit message
             if sample.action == "enter":
+                if not self.ready_to_welcome or not self.known_points:
+                    continue
+
                 new_robot_hash = hash_robot_id(str(sample.agent_id))
-                # If the new agent is the closest robot, send an initialization message
-                # The initalization message contains the map, map metadata, and all agents in the environment
                 if self.find_if_closest_robot(new_robot_hash):
                     print(f"Agent {sample.agent_id} of type '{sample.agent_type}' is requesting entry")
 
-                    # Message containing details of all active agents
                     agents_message = json.dumps(self.agents)
-
                     known_points_json = json.dumps(self.known_points)
 
                     init_message = Initialization(
@@ -162,8 +170,7 @@ class EntryExitListener(Listener):
                         known_points=known_points_json,
                     )
                     self.init_writer.write(init_message)
-
-                    # print(f'Sent initialization message to agent {sample.agent_id}')
+                    time.sleep(INTER_DDS_WRITE_SLEEP_S)
             elif sample.action == "initialized":
 
                 # Only if the sample.timestamp is recent
@@ -207,7 +214,11 @@ class EntryExitListener(Listener):
 
         # Loop through all agents to see if there is a closer robot (by hash)
         for agent_id, agent_info in self.agents.items():
-            agent_hash = agent_info["hash"]
+            if agent_id == self.my_id_int:
+                continue
+            agent_hash = agent_info.get("hash")
+            if agent_hash is None:
+                continue
 
             distance = abs(agent_hash - robot_hash)
             if distance < my_distance and distance != 0:
@@ -308,29 +319,39 @@ class InitializationListener(Listener):
 
             print(f"    Initialization message received from agent {sending_agent}")
 
-            # Ignore messages not intended for this agent
             if sample.target_agent != self.my_id_int:
                 continue
 
-            # Load the agents from the initialization message
+            # Apply reference points first so a bad agents payload cannot block join.
+            try:
+                known_points = json.loads(sample.known_points)
+                self.reference_known_points = known_points
+                self.known_points_received = True
+                print("    Reference points received through initialization message")
+            except (json.JSONDecodeError, TypeError) as exc:
+                rospy.logwarn("Initialization known_points parse failed: %s", exc)
+                continue
+
             agent_dict = json.loads(sample.agents)
-            if len(agent_dict) > 0:
-                # Cycle through agents in the initialization message and insert into our agents dictionary
-                for agent_id, agent_info in agent_dict.items():
-                    if agent_id != self.my_id:
-                        self.agents[int(agent_id)] = {
-                            "agent_type": agent_info["agent_type"],
-                            "ip_address": agent_info["ip_address"],
-                            "hash": agent_info["hash"],
-                            "timestamp": agent_info["timestamp"],
-                        }
-
-            # Load the known points from the initialization message
-            known_points = json.loads(sample.known_points)
-            self.reference_known_points = known_points
-            self.known_points_received = True
-
-            print("    Reference points received through initialization message")
+            for agent_id, agent_info in agent_dict.items():
+                try:
+                    aid = int(agent_id)
+                except (TypeError, ValueError):
+                    rospy.logwarn("Skipping initialization agent id %r", agent_id)
+                    continue
+                if aid == self.my_id_int:
+                    continue
+                if not isinstance(agent_info, dict):
+                    continue
+                try:
+                    self.agents[aid] = {
+                        "agent_type": agent_info.get("agent_type", DEFAULT_AGENT_TYPE),
+                        "ip_address": agent_info.get("ip_address", ""),
+                        "hash": agent_info.get("hash", hash_robot_id(str(aid))),
+                        "timestamp": agent_info.get("timestamp", int(time.time())),
+                    }
+                except (TypeError, ValueError) as exc:
+                    rospy.logwarn("Skipping bad agent entry %r: %s", agent_id, exc)
 
     def map_available(self):
         """
@@ -418,8 +439,8 @@ class EntryExitCommunication(TransformMixin):
         self.init_topic = Topic(self.participant, INITIALIZATION_TOPIC, Initialization)
 
         # Create the DataWriters and DataReaders
-        self.enter_exit_writer = DataWriter(self.publisher, self.entry_exit_topic, qos=reliable_qos)
-        self.init_writer = DataWriter(self.publisher, self.init_topic, qos=reliable_qos)
+        self.enter_exit_writer = DataWriter(self.publisher, self.entry_exit_topic, qos=entry_init_reliable_qos)
+        self.init_writer = DataWriter(self.publisher, self.init_topic, qos=entry_init_reliable_qos)
 
         # ROS Publisher for publishing transformation matrix
         self.transform_pub = rospy.Publisher(ROS_TOPIC_TRANSFORMATION_MATRIX, Float64MultiArray, queue_size=10)
@@ -491,22 +512,33 @@ class EntryExitCommunication(TransformMixin):
         self.entry_exit_listener.update_known_points(self.known_points)
 
         self.enter_exit_reader = DataReader(
-            self.subscriber, self.entry_exit_topic, listener=self.entry_exit_listener, qos=reliable_qos
+            self.subscriber,
+            self.entry_exit_topic,
+            listener=self.entry_exit_listener,
+            qos=entry_init_reliable_qos,
         )
-        self.init_reader = DataReader(self.subscriber, self.init_topic, listener=self.init_listener, qos=reliable_qos)
+        self.init_reader = DataReader(
+            self.subscriber,
+            self.init_topic,
+            listener=self.init_listener,
+            qos=entry_init_reliable_qos,
+        )
 
-        # Broadcast an entry message
+        print(f"    Waiting {INIT_DISCOVERY_GRACE_S}s for DDS discovery before enter...")
+        time.sleep(INIT_DISCOVERY_GRACE_S)
+
         entry_message = EntryExit(self.my_id_int, DEFAULT_AGENT_TYPE, "enter", self.my_ip, int(time.time()))
         self.enter_exit_writer.write(entry_message)
+        time.sleep(INTER_DDS_WRITE_SLEEP_S)
 
-        # Wait for the reference points to become available
         num_tries = 0
         while not self.init_listener.known_points_available() and num_tries < INIT_MAX_RETRIES:
             print("    Reference Points not yet received (attempt {0}/{1})".format(num_tries + 1, INIT_MAX_RETRIES))
-            time.sleep(1)
+            time.sleep(INIT_RETRY_SLEEP_S)
             if not self.init_listener.known_points_available():
                 entry_message.timestamp = int(time.time())
                 self.enter_exit_writer.write(entry_message)
+                time.sleep(INTER_DDS_WRITE_SLEEP_S)
                 num_tries += 1
 
         if self.init_listener.known_points_available():
@@ -542,16 +574,15 @@ class EntryExitCommunication(TransformMixin):
         # Update the entry/exit listener with the known points
         self.entry_exit_listener.update_known_points(self.reference_known_points)
 
-        # Update the agents in the entry/exit listener
         self.entry_exit_listener.update_agents(agents=self.agents)
+        self.entry_exit_listener.set_ready_to_welcome(True)
 
-        # Start the heartbeat reader now that we have the reference points, stop listening for initialization messages
         self.init_reader = None
         self.init_listener = None
 
-        # Send confirmation message to entry_exit topic
         entry_message = EntryExit(self.my_id_int, DEFAULT_AGENT_TYPE, "initialized", self.my_ip, int(time.time()))
         self.enter_exit_writer.write(entry_message)
+        time.sleep(INTER_DDS_WRITE_SLEEP_S)
 
         print("Initialization complete")
 

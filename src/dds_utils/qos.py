@@ -9,6 +9,13 @@ reliable_qos = Qos(
     Policy.History.KeepLast(depth=1),
 )
 
+# Entry/init need longer blocking time and are sensitive to discovery timing.
+entry_init_reliable_qos = Qos(
+    Policy.Reliability.Reliable(max_blocking_time=duration(milliseconds=500)),
+    Policy.Durability.TransientLocal,
+    Policy.History.KeepLast(depth=1),
+)
+
 best_effort_qos = Qos(
     Policy.Reliability.BestEffort,
     Policy.Durability.Volatile,

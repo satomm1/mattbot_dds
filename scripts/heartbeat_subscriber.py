@@ -9,6 +9,7 @@ from cyclonedds.core import Listener
 
 from dds_utils import (
     HEARTBEAT_PERIOD,
+    HEARTBEAT_STARTUP_DELAY_S,
     HEARTBEAT_TIMEOUT,
     HEARTBEAT_TOPIC,
     Heartbeat,
@@ -190,6 +191,8 @@ class HeartbeatSubscriber:
 
 if __name__ == "__main__":
     heartbeat_subscriber = HeartbeatSubscriber()
-    time.sleep(10)
+    startup_delay = rospy.get_param("~startup_delay", HEARTBEAT_STARTUP_DELAY_S)
+    rospy.loginfo("Waiting %.1fs before tracking heartbeats (entry_exit join window)", startup_delay)
+    time.sleep(startup_delay)
     rospy.on_shutdown(heartbeat_subscriber.shutdown)
     heartbeat_subscriber.run()

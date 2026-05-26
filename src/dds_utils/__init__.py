@@ -3,8 +3,11 @@ from .config import (
     DEFAULT_AGENT_TYPE,
     HEARTBEAT_PERIOD,
     HEARTBEAT_TIMEOUT,
+    INIT_DISCOVERY_GRACE_S,
     INIT_MAX_RETRIES,
     INIT_RECENT_THRESHOLD_S,
+    INIT_RETRY_SLEEP_S,
+    HEARTBEAT_STARTUP_DELAY_S,
     INTER_DDS_WRITE_SLEEP_S,
     LOCATION_PERIOD,
     PARTICIPANT_LEASE_DURATION_MS,
@@ -51,7 +54,7 @@ from .network import (
     require_robot_id_int,
 )
 from .participant import create_domain_participant
-from .qos import best_effort_qos, reliable_qos
+from .qos import best_effort_qos, entry_init_reliable_qos, reliable_qos
 from .topics import (
     ENTRY_EXIT_TOPIC,
     HEARTBEAT_TOPIC,
@@ -75,8 +78,11 @@ __all__ = [
     "DEFAULT_AGENT_TYPE",
     "HEARTBEAT_PERIOD",
     "HEARTBEAT_TIMEOUT",
+    "INIT_DISCOVERY_GRACE_S",
     "INIT_MAX_RETRIES",
     "INIT_RECENT_THRESHOLD_S",
+    "INIT_RETRY_SLEEP_S",
+    "HEARTBEAT_STARTUP_DELAY_S",
     "INTER_DDS_WRITE_SLEEP_S",
     "LOCATION_PERIOD",
     "PARTICIPANT_LEASE_DURATION_MS",
@@ -120,6 +126,7 @@ __all__ = [
     "parse_robot_id_int",
     "require_robot_id_int",
     "best_effort_qos",
+    "entry_init_reliable_qos",
     "reliable_qos",
     "ENTRY_EXIT_TOPIC",
     "HEARTBEAT_TOPIC",
