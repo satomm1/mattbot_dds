@@ -141,6 +141,7 @@ MSG_STAR_ENCODER_STATE = "star_encoder_state"
 MSG_STAR_GRU_OUT_EGO = "star_gru_out_ego"
 MSG_POSITION_INIT = "position_init"
 MSG_SEND_UNKNOWN_IMAGES = "send_unknown_images"
+MSG_AIR_QUALITY = "air_quality"
 
 
 def make_data_message(message_type: str, sending_agent: int, payload: dict) -> DataMessage:

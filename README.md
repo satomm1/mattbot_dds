@@ -76,7 +76,7 @@ Agents must subscribe to the shared ROS transform (`transformation_matrix` / `/t
 | `heartbeat_subscriber.py` | `heartbeat_subscriber` | Track other agents’ heartbeats → ROS (`/heartbeat_agents`, etc.) |
 | `location_publisher.py` | `location_publisher` | Publish this robot’s pose to DDS |
 | `location_subscriber.py` | `location_subscriber` | Other agents’ poses → ROS |
-| `data_publisher.py` | `dds_data_publisher` | ROS → DDS: objects, paths, goals, invalid goals, faces, multi-robot plans, optional STAR tensors, optional `global_observe_start` forwarding |
+| `data_publisher.py` | `dds_data_publisher` | ROS → DDS: objects, paths, goals, invalid goals, faces, multi-robot plans, optional STAR tensors, optional `global_observe_start` forwarding, air quality (`MSG_AIR_QUALITY` from `/air_quality`, default every 10 s) |
 | `data_subscriber.py` | `dds_data_subscriber` | DDS (peers) → ROS: e.g. `/object_from_agent`, `/object_from_sensor`, `/path_from_agent`, `/map_update`, `/new_face_encoding`, `/team/dds/...`, latched global observe relay |
 | `own_data_subscriber.py` | `dds_own_data_subscriber` | DDS (**this** `DataTopic`) → ROS: `/external_goal`, `/external_goal_multi`, `/initialpose`, `/send_unknown_images`, **`/stop`**; optional **`robot_shutdown`** → `rospy.signal_shutdown` (required node) |
 | `image_publisher.py` | (not in `dds.launch` by default) | Image DDS bridge when you run it explicitly |
@@ -94,6 +94,8 @@ Deprecated and test helpers live under `scripts/deprecated/` and `scripts/testin
 | `relay_global_observe_start_from_dds` | `true` | `data_subscriber`: DDS → ROS latched wall time |
 | `global_observe_start_ros_topic` | `/global_observe_start` | Output topic for relay |
 | `global_observe_start_dds_trigger_topic` | `/global_observe_start_dds` | Input topic for forwarder (avoids echoing `/global_observe_start` back onto DDS) |
+
+On `data_publisher`, private param `~air_quality_publish_period_s` (default **10.0**) sets how often `/air_quality` is forwarded to DDS as `MSG_AIR_QUALITY` (`"air_quality"`). JSON `data`: `temperature` (°F), `relative_humidity` (%), `voc_index`, `nox_index`. Consumers read `DataTopic{agent_id}` where `sending_agent == agent_id`.
 
 Run:
 

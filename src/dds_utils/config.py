@@ -3,6 +3,7 @@
 PARTICIPANT_LEASE_DURATION_MS = 30000
 
 HEARTBEAT_PERIOD = 10  # seconds
+AIR_QUALITY_PUBLISH_PERIOD_S = 10.0
 HEARTBEAT_TIMEOUT = 31  # seconds (unchanged from prior hardcoded value)
 
 LOCATION_PERIOD = 0.5  # seconds

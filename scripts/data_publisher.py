@@ -14,6 +14,7 @@ from nav_msgs.msg import Path
 from geometry_msgs.msg import Pose2D
 from std_msgs.msg import Float32MultiArray, Float64MultiArray, Time as RosTimeMsg
 from mattbot_image_detection.msg import FaceEncoding
+from mattbot_bringup.msg import AirQuality
 
 from cyclonedds.topic import Topic
 from cyclonedds.pub import Publisher, DataWriter
@@ -27,7 +28,9 @@ import copy
 import numpy as np
 
 from dds_utils import (
+    AIR_QUALITY_PUBLISH_PERIOD_S,
     INTER_DDS_WRITE_SLEEP_S,
+    MSG_AIR_QUALITY,
     MSG_DETECTED_OBJECT,
     MSG_FACE_ENCODING,
     MSG_GLOBAL_OBSERVE_START,
@@ -259,6 +262,24 @@ class DataPublisher(TransformMixin):
             bool(self._forward_multi_agent_active_traj),
         )
 
+        self._latest_air_quality = None
+        self._sub_air_quality = rospy.Subscriber(
+            "/air_quality", AirQuality, self._air_quality_callback, queue_size=1
+        )
+        air_quality_period = rospy.get_param(
+            "~air_quality_publish_period_s", AIR_QUALITY_PUBLISH_PERIOD_S
+        )
+        rospy.Timer(
+            rospy.Duration(air_quality_period),
+            self._air_quality_dds_timer,
+            oneshot=False,
+        )
+        rospy.loginfo(
+            "dds_data_publisher: /air_quality -> DDS %s every %.1f s",
+            MSG_AIR_QUALITY,
+            air_quality_period,
+        )
+
     def _sender_id_optional(self):
         """Sending agent id for DDS messages that previously used 0 when ROBOT_ID was unset."""
         return self.my_id_int
@@ -272,6 +293,23 @@ class DataPublisher(TransformMixin):
         self.data_writer.write(make_data_message(message_type, aid, payload))
         if sleep:
             time.sleep(INTER_DDS_WRITE_SLEEP_S)
+
+    def _air_quality_callback(self, msg):
+        self._latest_air_quality = msg
+
+    def _air_quality_dds_timer(self, _event):
+        if self._latest_air_quality is None:
+            return
+        m = self._latest_air_quality
+        self._publish_data(
+            MSG_AIR_QUALITY,
+            {
+                "temperature": float(m.temperature),
+                "relative_humidity": float(m.relative_humidity),
+                "voc_index": float(m.voc_index),
+                "nox_index": float(m.nox_index),
+            },
+        )
 
     def _get_writer_for_target(self, agent_id):
         """Reliable DataWriter on DataTopic{agent_id}, cached per target."""

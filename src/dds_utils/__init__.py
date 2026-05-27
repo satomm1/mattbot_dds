@@ -1,5 +1,6 @@
 # Backwards-compatible public API — submodules hold implementation.
 from .config import (
+    AIR_QUALITY_PUBLISH_PERIOD_S,
     DEFAULT_AGENT_TYPE,
     HEARTBEAT_PERIOD,
     HEARTBEAT_TIMEOUT,
@@ -20,6 +21,7 @@ from .messages import (
     ImageMessage,
     Initialization,
     Location,
+    MSG_AIR_QUALITY,
     MSG_DETECTED_OBJECT,
     MSG_FACE_ENCODING,
     MSG_GLOBAL_OBSERVE_START,
@@ -75,6 +77,7 @@ from .topics import (
 from .transform import TransformMixin, pack_transform_msg, parse_transform_msg, transform_point, transform_points
 
 __all__ = [
+    "AIR_QUALITY_PUBLISH_PERIOD_S",
     "DEFAULT_AGENT_TYPE",
     "HEARTBEAT_PERIOD",
     "HEARTBEAT_TIMEOUT",
@@ -93,6 +96,7 @@ __all__ = [
     "ImageMessage",
     "Initialization",
     "Location",
+    "MSG_AIR_QUALITY",
     "MSG_DETECTED_OBJECT",
     "MSG_FACE_ENCODING",
     "MSG_GLOBAL_OBSERVE_START",

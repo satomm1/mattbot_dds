@@ -65,6 +65,7 @@
   <exec_depend>nav_msgs</exec_depend>
   <exec_depend>tf2_msgs</exec_depend>
   <exec_depend>message_runtime</exec_depend>
+  <exec_depend>mattbot_bringup</exec_depend>
 
 
   <!-- The export tag contains other, unspecified, tags -->

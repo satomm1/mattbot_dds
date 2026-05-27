@@ -18,6 +18,7 @@
     <node name="location_publisher" pkg="mattbot_dds" type="location_publisher.py" output="screen"/>
     
     <node name="data_publisher" pkg="mattbot_dds" type="data_publisher.py" output="screen">
+        <param name="air_quality_publish_period_s" value="10.0"/>
         <param name="sqlite" value="$(arg sqlite)"/>
         <param name="forward_global_observe_start_via_dds" value="$(arg forward_global_observe_start_via_dds)"/>
         <param name="global_observe_start_dds_trigger_topic" value="$(arg global_observe_start_dds_trigger_topic)"/>
