@@ -64,6 +64,7 @@ add_message_files(
   MultiAgentExecuteAt.msg
   MultiAgentTimingSolve.msg
   MultiAgentActiveTrajectory.msg
+  MultiAgentCollisionReport.msg
 )
 
 ## Generate services in the 'srv' folder

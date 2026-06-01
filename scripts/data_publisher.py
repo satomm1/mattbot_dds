@@ -9,6 +9,7 @@ from mattbot_dds.msg import (
     MultiAgentExecuteAt,
     MultiAgentTimingSolve,
     MultiAgentActiveTrajectory,
+    MultiAgentCollisionReport,
 )
 from nav_msgs.msg import Path
 from geometry_msgs.msg import Pose2D
@@ -42,6 +43,7 @@ from dds_utils import (
     MSG_MULTI_AGENT_EXECUTE_AT,
     MSG_MULTI_AGENT_TIMING_SOLVE,
     MSG_MULTI_AGENT_ACTIVE_TRAJECTORY,
+    MSG_MULTI_AGENT_COLLISION_REPORT,
     MSG_PATH,
     MSG_PERSON_DETECTED,
     MSG_STAR_ENCODER_STATE,
@@ -171,6 +173,21 @@ class DataPublisher(TransformMixin):
             "dds_data_publisher: multi-agent planned paths on %s -> DDS %s",
             self._multi_agent_planned_path_topic,
             MSG_MULTI_AGENT_PLANNED_PATH,
+        )
+
+        self._multi_agent_collision_report_topic = rospy.get_param(
+            "~multi_agent_collision_report_for_dds_topic", "/multi_agent_collision_report_for_dds"
+        ).strip() or "/multi_agent_collision_report_for_dds"
+        self._sub_multi_agent_collision_report = rospy.Subscriber(
+            self._multi_agent_collision_report_topic,
+            MultiAgentCollisionReport,
+            self.multi_agent_collision_report_callback,
+            queue_size=10,
+        )
+        rospy.logdebug(
+            "dds_data_publisher: multi-agent collision reports on %s -> DDS %s",
+            self._multi_agent_collision_report_topic,
+            MSG_MULTI_AGENT_COLLISION_REPORT,
         )
 
         self._forward_multi_agent_execute_at = bool(
@@ -578,6 +595,28 @@ class DataPublisher(TransformMixin):
             msg.poses[i].pose.position.y = new_point[1]
 
         self._publish_data(MSG_PATH, message_converter.convert_ros_message_to_dictionary(msg))
+
+    def multi_agent_collision_report_callback(self, msg):
+        """Forward distributed collision detection report to DDS peer telemetry."""
+        payload = {
+            "plan_id": str(msg.plan_id),
+            "source_agent": int(msg.source_agent),
+            "robot_i": int(msg.robot_i),
+            "robot_j": int(msg.robot_j),
+            "segment_i": [int(x) for x in (msg.segment_i or [])],
+            "segment_j": [int(x) for x in (msg.segment_j or [])],
+            "complete": bool(msg.complete),
+        }
+        self._publish_data(MSG_MULTI_AGENT_COLLISION_REPORT, payload)
+        rospy.logdebug(
+            "dds_data_publisher: sent %s plan_id=%s pair=(%s,%s) segments=%d complete=%s",
+            MSG_MULTI_AGENT_COLLISION_REPORT,
+            msg.plan_id,
+            msg.robot_i,
+            msg.robot_j,
+            len(payload["segment_i"]),
+            msg.complete,
+        )
 
     def multi_agent_planned_path_callback(self, msg):
         """Forward planned path + plan_id to DDS (inter-robot frame, same as path_callback)."""

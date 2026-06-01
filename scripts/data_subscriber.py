@@ -2,7 +2,7 @@ import rospy
 from rospy_message_converter import message_converter
 from mattbot_image_detection.msg import DetectedObject, DetectedObjectArray
 from geometry_msgs.msg import Pose
-from mattbot_dds.msg import AgentPath, MapUpdate, MultiAgentPlannedPath
+from mattbot_dds.msg import AgentPath, MapUpdate, MultiAgentPlannedPath, MultiAgentCollisionReport
 from nav_msgs.msg import Path
 from std_msgs.msg import Float32MultiArray, Float64MultiArray, Int16MultiArray, Time as RosTimeMsg
 from mattbot_image_detection.msg import FaceEncoding
@@ -26,6 +26,7 @@ from dds_utils import (
     MSG_MAP_UPDATE,
     MSG_PATH,
     MSG_MULTI_AGENT_PLANNED_PATH,
+    MSG_MULTI_AGENT_COLLISION_REPORT,
     MSG_SENSOR_DETECTED_OBJECTS,
     MSG_STAR_ENCODER_STATE,
     MSG_STAR_GRU_OUT_EGO,
@@ -56,6 +57,7 @@ class DataListener(Listener, TransformMixin):
         object_sensor_publisher,
         path_publisher,
         multi_agent_planned_path_publisher,
+        multi_agent_collision_report_publisher,
         map_update_publisher,
         face_encoding_publisher,
         global_observe_publisher=None,
@@ -68,6 +70,7 @@ class DataListener(Listener, TransformMixin):
         self.object_sensor_publisher = object_sensor_publisher
         self.path_publisher = path_publisher
         self.multi_agent_planned_path_publisher = multi_agent_planned_path_publisher
+        self.multi_agent_collision_report_publisher = multi_agent_collision_report_publisher
         self.map_update_publisher = map_update_publisher
         self.face_encoding_publisher = face_encoding_publisher
         self.global_observe_publisher = global_observe_publisher
@@ -193,6 +196,24 @@ class DataListener(Listener, TransformMixin):
                         len(new_path.poses),
                     )
 
+                elif message_type == MSG_MULTI_AGENT_COLLISION_REPORT:
+                    out = MultiAgentCollisionReport()
+                    out.plan_id = str(data.get("plan_id", ""))
+                    out.source_agent = int(sending_agent)
+                    out.robot_i = int(data.get("robot_i", 0))
+                    out.robot_j = int(data.get("robot_j", 0))
+                    out.segment_i = [int(x) for x in (data.get("segment_i") or [])]
+                    out.segment_j = [int(x) for x in (data.get("segment_j") or [])]
+                    out.complete = bool(data.get("complete", False))
+                    self.multi_agent_collision_report_publisher.publish(out)
+                    rospy.logdebug(
+                        "dds_data_subscriber: multi_agent_collision_report from agent %s plan_id=%s pair=(%s,%s)",
+                        self.topic_id,
+                        out.plan_id,
+                        out.robot_i,
+                        out.robot_j,
+                    )
+
                 elif message_type == MSG_MAP_UPDATE:
                     map_update = message_converter.convert_dictionary_to_ros_message("mattbot_dds/MapUpdate", data)
 
@@ -292,6 +313,16 @@ class DataSubscriber(TransformMixin):
             "dds_data_subscriber: peer multi_agent_planned_path -> %s",
             self._multi_agent_planned_path_from_agent_topic,
         )
+        self._multi_agent_collision_report_from_agent_topic = rospy.get_param(
+            "~multi_agent_collision_report_from_agent_topic", "/multi_agent_collision_report_from_agent"
+        ).strip() or "/multi_agent_collision_report_from_agent"
+        self.multi_agent_collision_report_publisher = rospy.Publisher(
+            self._multi_agent_collision_report_from_agent_topic, MultiAgentCollisionReport, queue_size=10
+        )
+        rospy.loginfo(
+            "dds_data_subscriber: peer multi_agent_collision_report -> %s",
+            self._multi_agent_collision_report_from_agent_topic,
+        )
         self.map_update_publisher = rospy.Publisher("/map_update", MapUpdate, queue_size=10)
         self.face_encoding_publisher = rospy.Publisher("/new_face_encoding", FaceEncoding, queue_size=10)
 
@@ -344,6 +375,7 @@ class DataSubscriber(TransformMixin):
                         self.object_sensor_publisher,
                         self.path_publisher,
                         self.multi_agent_planned_path_publisher,
+                        self.multi_agent_collision_report_publisher,
                         self.map_update_publisher,
                         self.face_encoding_publisher,
                         global_observe_publisher=self.global_observe_publisher,
