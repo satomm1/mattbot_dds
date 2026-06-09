@@ -205,6 +205,7 @@ class DataListener(Listener, TransformMixin):
                     out.segment_i = [int(x) for x in (data.get("segment_i") or [])]
                     out.segment_j = [int(x) for x in (data.get("segment_j") or [])]
                     out.complete = bool(data.get("complete", False))
+                    out.sent_stamp = float(data.get("sent_stamp", 0.0))
                     self.multi_agent_collision_report_publisher.publish(out)
                     rospy.logdebug(
                         "dds_data_subscriber: multi_agent_collision_report from agent %s plan_id=%s pair=(%s,%s)",

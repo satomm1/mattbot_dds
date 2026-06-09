@@ -8,3 +8,4 @@ int32 robot_j
 int32[] segment_i
 int32[] segment_j
 bool complete
+float64 sent_stamp   # rospy time (sec) at publisher before DDS forward

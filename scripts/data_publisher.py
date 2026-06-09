@@ -606,6 +606,7 @@ class DataPublisher(TransformMixin):
             "segment_i": [int(x) for x in (msg.segment_i or [])],
             "segment_j": [int(x) for x in (msg.segment_j or [])],
             "complete": bool(msg.complete),
+            "sent_stamp": float(msg.sent_stamp),
         }
         self._publish_data(MSG_MULTI_AGENT_COLLISION_REPORT, payload)
         rospy.logdebug(
