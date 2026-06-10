@@ -191,7 +191,7 @@ class LocationPublisher(TransformMixin):
             rospy.sleep(LOCATION_PERIOD)
 
     def shutdown(self):
-        rospy.loginfo("Shutting down DDS location publisher...")
+        rospy.logdebug("Shutting down")
         self.location_writer = None
         self.publisher = None
         dispose_participant(self.participant)

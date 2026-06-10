@@ -31,6 +31,7 @@ from dds_utils import (
     MSG_STAR_ENCODER_STATE,
     MSG_STAR_GRU_OUT_EGO,
     DataMessage,
+    DdsLogger,
     ROS_TOPIC_AGENTS_TO_SUBSCRIBE,
     ROS_TOPIC_TRANSFORMATION_MATRIX,
     RobotIdError,
@@ -42,6 +43,8 @@ from dds_utils import (
     reliable_qos,
     require_robot_id_int,
 )
+
+_log = DdsLogger("data_subscriber")
 
 ##################################################
 # This script is used to subscribe to various DataTopics
@@ -111,7 +114,7 @@ class DataListener(Listener, TransformMixin):
                     new_object.pose.position.y = new_point[1]
 
                     self.object_publisher.publish(new_object)
-                    print("Received object from agent " + str(self.topic_id))
+                    _log.info("Received object from agent %s", self.topic_id)
 
                     if self.db is not None:
                         self.db.add_object(
@@ -166,7 +169,7 @@ class DataListener(Listener, TransformMixin):
                     new_agent_path.agentID.data = self.topic_id
                     new_agent_path.path = new_path
                     self.path_publisher.publish(new_agent_path)
-                    print("Received path from agent " + str(self.topic_id))
+                    _log.info("Received path from agent %s", self.topic_id)
 
                 elif message_type == MSG_MULTI_AGENT_PLANNED_PATH:
                     plan_id = data.get("plan_id", "")
@@ -250,8 +253,8 @@ class DataListener(Listener, TransformMixin):
                     tmsg.data.secs = int(sec)
                     tmsg.data.nsecs = int(nsec)
                     self.global_observe_publisher.publish(tmsg)
-                    rospy.loginfo(
-                        "dds_data_subscriber: relayed global_observe_start from agent %s -> %s",
+                    _log.info(
+                        "relayed global_observe_start from agent %s -> %s",
                         self.topic_id,
                         tmsg.data,
                     )
@@ -266,7 +269,7 @@ class DataListener(Listener, TransformMixin):
                     face_encoding.name = name
                     face_encoding.external = True  # This face encoding came from an external agent
 
-                    print("Received face encoding via DDS")
+                    _log.info("Received face encoding via DDS")
 
                     self.face_encoding_publisher.publish(face_encoding)
             else:
@@ -310,20 +313,14 @@ class DataSubscriber(TransformMixin):
         self.multi_agent_planned_path_publisher = rospy.Publisher(
             self._multi_agent_planned_path_from_agent_topic, MultiAgentPlannedPath, queue_size=10
         )
-        rospy.loginfo(
-            "dds_data_subscriber: peer multi_agent_planned_path -> %s",
-            self._multi_agent_planned_path_from_agent_topic,
-        )
+        _log.debug("peer multi_agent_planned_path -> %s", self._multi_agent_planned_path_from_agent_topic)
         self._multi_agent_collision_report_from_agent_topic = rospy.get_param(
             "~multi_agent_collision_report_from_agent_topic", "/multi_agent_collision_report_from_agent"
         ).strip() or "/multi_agent_collision_report_from_agent"
         self.multi_agent_collision_report_publisher = rospy.Publisher(
             self._multi_agent_collision_report_from_agent_topic, MultiAgentCollisionReport, queue_size=10
         )
-        rospy.loginfo(
-            "dds_data_subscriber: peer multi_agent_collision_report -> %s",
-            self._multi_agent_collision_report_from_agent_topic,
-        )
+        _log.debug("peer multi_agent_collision_report -> %s", self._multi_agent_collision_report_from_agent_topic)
         self.map_update_publisher = rospy.Publisher("/map_update", MapUpdate, queue_size=10)
         self.face_encoding_publisher = rospy.Publisher("/new_face_encoding", FaceEncoding, queue_size=10)
 
@@ -337,11 +334,7 @@ class DataSubscriber(TransformMixin):
                 queue_size=1,
                 latch=True,
             )
-            rospy.loginfo(
-                "dds_data_subscriber: relaying %s from DDS to %s",
-                MSG_GLOBAL_OBSERVE_START,
-                self._global_observe_ros_topic,
-            )
+            _log.debug("relaying %s from DDS to %s", MSG_GLOBAL_OBSERVE_START, self._global_observe_ros_topic)
 
         self.subscribed_agents = set()
         self.agents_to_subscribe = set()
@@ -368,7 +361,7 @@ class DataSubscriber(TransformMixin):
                 old_agents = self.subscribed_agents - self.agents_to_subscribe
 
                 for agent_id in new_agents:
-                    print(f"    Subscribed to agent {agent_id} data")
+                    _log.info("Subscribed to agent %s data", agent_id)
                     new_data_topic = Topic(self.participant, data_topic_name(agent_id), DataMessage)
                     self.data_listeners[agent_id] = DataListener(
                         agent_id,
@@ -388,7 +381,7 @@ class DataSubscriber(TransformMixin):
                     )
 
                 for agent_id in old_agents:
-                    print(f"    Unsubscribed from agent {agent_id} data")
+                    _log.info("Unsubscribed from agent %s data", agent_id)
                     self.data_readers[agent_id] = None
                     self.data_listeners[agent_id] = None
                     self.data_readers.pop(agent_id)
@@ -402,7 +395,7 @@ class DataSubscriber(TransformMixin):
             rospy.sleep(1)
 
     def shutdown(self):
-        print("Shutting down DDS Data Subscriber")
+        _log.debug("Shutting down")
         self.data_readers.clear()
         self.data_listeners.clear()
         self.subscriber = None

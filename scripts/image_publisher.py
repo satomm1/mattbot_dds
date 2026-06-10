@@ -59,7 +59,7 @@ class ImagePublisher:
         rospy.spin()
 
     def shutdown(self):
-        rospy.loginfo("Shutting down Image Publisher...")
+        rospy.logdebug("Shutting down Image Publisher")
         self.image_subscriber.unregister()
         self.image_writer = None
         self.publisher = None

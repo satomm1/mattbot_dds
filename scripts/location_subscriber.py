@@ -12,6 +12,7 @@ import numpy as np
 
 from dds_utils import (
     Location,
+    DdsLogger,
     ROS_TOPIC_AGENTS_TO_SUBSCRIBE,
     ROS_TOPIC_TRANSFORMATION_MATRIX,
     RobotIdError,
@@ -22,6 +23,8 @@ from dds_utils import (
     location_topic_name,
     require_robot_id_int,
 )
+
+_log = DdsLogger("location_subscriber")
 
 
 class LocationListener(Listener, TransformMixin):
@@ -136,7 +139,7 @@ class LocationSubscriber(TransformMixin):
                 old_agents = self.subscribed_agents - self.agents_to_subscribe
 
                 for agent_id in new_agents:
-                    print(f"    Subscribed to agent {agent_id} location")
+                    _log.info("Subscribed to agent %s location", agent_id)
                     new_location_topic = Topic(self.participant, location_topic_name(agent_id), Location)
                     self.location_listeners[agent_id] = LocationListener(self.my_id_int, agent_id)
                     self.location_listeners[agent_id].update_transformation(self.R, self.t)
@@ -145,7 +148,7 @@ class LocationSubscriber(TransformMixin):
                     )
 
                 for agent_id in old_agents:
-                    print(f"    Unsubscribed from agent {agent_id} location")
+                    _log.info("Unsubscribed from agent %s location", agent_id)
                     self.location_readers[agent_id] = None
                     self.location_listeners[agent_id] = None
                     self.location_readers.pop(agent_id)
@@ -159,7 +162,7 @@ class LocationSubscriber(TransformMixin):
             rospy.sleep(1)
 
     def shutdown(self):
-        rospy.loginfo("Shutting down DDS location publisher...")
+        _log.debug("Shutting down")
         self.location_readers.clear()
         self.location_listeners.clear()
         self.subscriber = None

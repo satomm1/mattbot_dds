@@ -18,6 +18,7 @@ import numpy as np
 
 from dds_utils import (
     DEFAULT_AGENT_TYPE,
+    DdsLogger,
     ENTRY_EXIT_TOPIC,
     HEARTBEAT_PERIOD,
     INIT_DISCOVERY_GRACE_S,
@@ -46,6 +47,12 @@ from dds_utils import (
     pack_transform_msg,
     require_robot_id_int,
 )
+
+
+_log = DdsLogger("entry_exit")
+_log_info = _log.info
+_log_warn = _log.warn
+_log_debug = _log.debug
 
 
 def _occupancy_grid_from_map_dict(map_data):
@@ -155,7 +162,11 @@ class EntryExitListener(Listener):
                 if not self.ready_to_welcome or not self.known_points:
                     continue
 
-                print(f"Agent {sample.agent_id} of type '{sample.agent_type}' is requesting entry")
+                _log_info(
+                    "Agent %s of type '%s' is requesting entry",
+                    sample.agent_id,
+                    sample.agent_type,
+                )
 
                 agents_message = json.dumps(self.agents)
                 known_points_json = json.dumps(self.known_points)
@@ -172,7 +183,11 @@ class EntryExitListener(Listener):
 
                 # Only if the sample.timestamp is recent
                 if int(time.time()) - sample.timestamp < INIT_RECENT_THRESHOLD_S:
-                    print(f"Agent {sample.agent_id} of type '{sample.agent_type}' entered the environment")
+                    _log_info(
+                        "Agent %s of type '%s' entered the environment",
+                        sample.agent_id,
+                        sample.agent_type,
+                    )
 
                     # Agent initialized, add to agents dictionary
                     new_robot_hash = hash_robot_id(str(sample.agent_id))
@@ -191,7 +206,7 @@ class EntryExitListener(Listener):
             elif sample.action == "exit":
                 # Agent Exited, remove from agents dictionary
                 if sample.agent_id in self.agents:
-                    print(f"Agent {sample.agent_id} exited the environment")
+                    _log_info("Agent %s exited the environment", sample.agent_id)
                     self.agents.pop(sample.agent_id)  # Pop from agents dictionary
                     self.exited_agents[sample.agent_id] = int(time.time())  # Add to exited agents dictionary
                     self.update_to_agents = True
@@ -285,7 +300,7 @@ class InitializationListener(Listener):
             if sending_agent == self.my_id_int:
                 continue
 
-            print(f"    Initialization message received from agent {sending_agent}")
+            _log_info("Initialization message received from agent %s", sending_agent)
 
             if sample.target_agent != self.my_id_int:
                 continue
@@ -293,25 +308,25 @@ class InitializationListener(Listener):
             try:
                 known_points = json.loads(sample.known_points)
             except (json.JSONDecodeError, TypeError) as exc:
-                rospy.logwarn("Initialization known_points parse failed: %s", exc)
+                _log_warn("Initialization known_points parse failed: %s", exc)
                 continue
 
             if not self.known_points_received:
                 self.reference_known_points = known_points
                 self.known_points_received = True
-                print("    Reference points received through initialization message")
+                _log_info("Reference points received through initialization message")
 
             try:
                 agent_dict = json.loads(sample.agents)
             except (json.JSONDecodeError, TypeError) as exc:
-                rospy.logwarn("Initialization agents parse failed: %s", exc)
+                _log_warn("Initialization agents parse failed: %s", exc)
                 continue
 
             for agent_id, agent_info in agent_dict.items():
                 try:
                     aid = int(agent_id)
                 except (TypeError, ValueError):
-                    rospy.logwarn("Skipping initialization agent id %r", agent_id)
+                    _log_warn("Skipping initialization agent id %r", agent_id)
                     continue
                 if aid == self.my_id_int:
                     continue
@@ -327,7 +342,7 @@ class InitializationListener(Listener):
                         "timestamp": agent_info.get("timestamp", int(time.time())),
                     }
                 except (TypeError, ValueError) as exc:
-                    rospy.logwarn("Skipping bad agent entry %r: %s", agent_id, exc)
+                    _log_warn("Skipping bad agent entry %r: %s", agent_id, exc)
 
     def map_available(self):
         """
@@ -388,11 +403,9 @@ class EntryExitCommunication(TransformMixin):
             rospy.logfatal("%s", exc)
             sys.exit(1)
         self.my_id = str(self.my_id_int)
-        print(f"\nMy Agent ID is {self.my_id}")
         self.my_hash = hash_robot_id(self.my_id_int)
-
         self.my_ip = get_local_ip()
-        print(f"My IP address is {self.my_ip}")
+        _log_info("My Agent ID is %s, IP address is %s", self.my_id, self.my_ip)
 
         # Dictionary to store agents in the environment
         self.agents = dict()
@@ -475,7 +488,7 @@ class EntryExitCommunication(TransformMixin):
         Returns:
             None
         """
-        print("Starting Setup:")
+        _log_info("===== SETUP START (robot_id=%s) =====", self.my_id)
 
         # Load the map from the current_map.json file and publish it
         self.load_map()
@@ -500,7 +513,7 @@ class EntryExitCommunication(TransformMixin):
             qos=entry_init_reliable_qos,
         )
 
-        print(f"    Waiting {INIT_DISCOVERY_GRACE_S}s for DDS discovery before enter...")
+        _log_debug("Waiting %.1fs for DDS discovery before enter", INIT_DISCOVERY_GRACE_S)
         time.sleep(INIT_DISCOVERY_GRACE_S)
 
         entry_message = EntryExit(self.my_id_int, DEFAULT_AGENT_TYPE, "enter", self.my_ip, int(time.time()))
@@ -509,7 +522,11 @@ class EntryExitCommunication(TransformMixin):
 
         num_tries = 0
         while not self.init_listener.known_points_available() and num_tries < INIT_MAX_RETRIES:
-            print("    Reference Points not yet received (attempt {0}/{1})".format(num_tries + 1, INIT_MAX_RETRIES))
+            _log_info(
+                "Reference points not yet received (attempt %s/%s)",
+                num_tries + 1,
+                INIT_MAX_RETRIES,
+            )
             time.sleep(INIT_RETRY_SLEEP_S)
             if not self.init_listener.known_points_available():
                 entry_message.timestamp = int(time.time())
@@ -518,7 +535,7 @@ class EntryExitCommunication(TransformMixin):
                 num_tries += 1
 
         if self.init_listener.known_points_available():
-            print("    I am not the first agent, received reference points")
+            _log_info("I am not the first agent, received reference points")
 
             # Store the map, map metadata, and agents
             self.reference_known_points = self.init_listener.get_known_points()
@@ -535,7 +552,7 @@ class EntryExitCommunication(TransformMixin):
             # Update the agents in the entry/exit listener
             self.entry_exit_listener.update_agents(agents=self.agents)
         else:
-            print("    I am the first agent, my map will be the reference map")
+            _log_info("I am the first agent, my map will be the reference map")
             self.reference_known_points = self.known_points
 
             self.agents[self.my_id_int] = {
@@ -560,7 +577,7 @@ class EntryExitCommunication(TransformMixin):
         self.enter_exit_writer.write(entry_message)
         time.sleep(INTER_DDS_WRITE_SLEEP_S)
 
-        print("Initialization complete")
+        _log_info("===== SETUP COMPLETE (robot_id=%s) =====", self.my_id)
 
     def load_map(self):
 
@@ -595,7 +612,7 @@ class EntryExitCommunication(TransformMixin):
         self.map_mod_publisher.publish(self.map_mod_msg)
         self.map_md_publisher.publish(self.map_md_msg)
 
-        print("    Map loaded from current_map.json")
+        _log_info("Map loaded from current_map.json")
 
     def create_transform(self):
         """
@@ -720,7 +737,7 @@ class EntryExitCommunication(TransformMixin):
             self.exited_agent_pub.publish(exited_agents)
 
     def shutdown(self):
-        print("\nSending exit message...")
+        _log_info("Sending DDS exit message")
         # Write exit message
         exit_message = EntryExit(self.my_id_int, DEFAULT_AGENT_TYPE, "exit", self.my_ip, int(time.time()))
         if self.enter_exit_writer is not None:

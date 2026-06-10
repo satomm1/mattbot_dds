@@ -27,6 +27,7 @@ from dds_utils import (
     MSG_SEND_UNKNOWN_IMAGES,
     MSG_STOP,
     DataMessage,
+    DdsLogger,
     POSITION_INIT_RECENT_THRESHOLD_S,
     ROS_TOPIC_TRANSFORMATION_MATRIX,
     RobotIdError,
@@ -44,6 +45,8 @@ from mattbot_dds.msg import (
     MultiAgentTimingSolve,
     MultiAgentActiveTrajectory,
 )
+
+_log = DdsLogger("own_data_subscriber")
 
 ##################################################
 # This script process data messages sent to this agent
@@ -86,8 +89,8 @@ class SelfDataListener(Listener, TransformMixin):
         self.multi_agent_active_traj_pub = rospy.Publisher(
             self._multi_agent_active_traj_ros_topic, MultiAgentActiveTrajectory, queue_size=2, latch=False
         )
-        rospy.loginfo(
-            "dds_own_data_subscriber: multi-agent ROS pubs -> execute_at=%s timing_solve=%s active_traj=%s",
+        _log.debug(
+            "multi-agent ROS pubs -> execute_at=%s timing_solve=%s active_traj=%s",
             self._multi_agent_execute_at_ros_topic,
             self._multi_agent_timing_solve_ros_topic,
             self._multi_agent_active_traj_ros_topic,
@@ -102,7 +105,7 @@ class SelfDataListener(Listener, TransformMixin):
         # Database connection
         self.db = sqlite_db
 
-        rospy.logdebug("dds_own_data_subscriber: created listener for topic %s", topic_id)
+        _log.debug("created listener for topic %s", topic_id)
 
     def on_data_available(self, reader):
         for sample in reader.read():
@@ -116,8 +119,8 @@ class SelfDataListener(Listener, TransformMixin):
             timestamp = sample.timestamp
             data = json.loads(sample.data)
 
-            rospy.logdebug(
-                "dds_own_data_subscriber: RX from agent %s type=%s",
+            _log.debug(
+                "RX from agent %s type=%s",
                 sending_agent,
                 message_type,
             )
@@ -128,8 +131,8 @@ class SelfDataListener(Listener, TransformMixin):
                 # Transform the goal point to this occupancy grid
                 x, y, theta = self.transform_point([data["x"], data["y"], data["theta"]], forward=False)
 
-                rospy.logdebug(
-                    "dds_own_data_subscriber: goal from agent %s x=%s y=%s theta=%s",
+                _log.debug(
+                    "goal from agent %s x=%s y=%s theta=%s",
                     sending_agent,
                     x,
                     y,
@@ -151,7 +154,7 @@ class SelfDataListener(Listener, TransformMixin):
                 coordinated = bool(data.get("coordinated", True))
                 target_agent = int(data.get("target_agent", self.my_id_int))
                 if target_agent != self.my_id_int:
-                    rospy.logwarn(
+                    _log.warn(
                         "multi_robot_goal target_agent %s != my_id %s; using transformed pose anyway",
                         target_agent,
                         self.my_id,
@@ -170,7 +173,7 @@ class SelfDataListener(Listener, TransformMixin):
                 else:
                     ext.fleet_robot_ids = []
                 self.goal_multi_pub.publish(ext)
-                rospy.logdebug(
+                _log.debug(
                     "Received multi_robot_goal from agent %s plan_id=%s",
                     sending_agent,
                     plan_id,
@@ -185,7 +188,7 @@ class SelfDataListener(Listener, TransformMixin):
                 plan_id = data.get("plan_id", "")
                 sec, nsec = data.get("sec"), data.get("nsec")
                 if sec is None or nsec is None:
-                    rospy.logwarn("multi_agent_execute_at: missing sec/nsec from agent %s", sending_agent)
+                    _log.warn("multi_agent_execute_at: missing sec/nsec from agent %s", sending_agent)
                     continue
                 fleet = data.get("fleet_robot_ids")
                 fleet_ids = [int(x) for x in fleet] if isinstance(fleet, list) else []
@@ -194,8 +197,8 @@ class SelfDataListener(Listener, TransformMixin):
                 ext.execute_at = rospy.Time(int(sec), int(nsec))
                 ext.fleet_robot_ids = fleet_ids
                 self.multi_agent_execute_at_pub.publish(ext)
-                rospy.logdebug(
-                    "dds_own_data_subscriber: multi_agent_execute_at from agent %s plan_id=%s execute_at=%s",
+                _log.debug(
+                    "multi_agent_execute_at from agent %s plan_id=%s execute_at=%s",
                     sending_agent,
                     plan_id,
                     ext.execute_at,
@@ -204,7 +207,7 @@ class SelfDataListener(Listener, TransformMixin):
                 plan_id = data.get("plan_id", "")
                 src = data.get("source_agent")
                 if src is None:
-                    rospy.logwarn("multi_agent_timing_solve: missing source_agent from agent %s", sending_agent)
+                    _log.warn("multi_agent_timing_solve: missing source_agent from agent %s", sending_agent)
                     continue
                 fleet = data.get("fleet_robot_ids")
                 fleet_ids = [int(x) for x in fleet] if isinstance(fleet, list) else []
@@ -219,8 +222,8 @@ class SelfDataListener(Listener, TransformMixin):
                 out.waypoint_counts = counts
                 out.waypoint_times_flat = flat
                 self.multi_agent_timing_solve_pub.publish(out)
-                rospy.logdebug(
-                    "dds_own_data_subscriber: multi_agent_timing_solve from agent %s plan_id=%s source=%s",
+                _log.debug(
+                    "multi_agent_timing_solve from agent %s plan_id=%s source=%s",
                     sending_agent,
                     plan_id,
                     out.source_agent,
@@ -228,15 +231,15 @@ class SelfDataListener(Listener, TransformMixin):
             elif message_type == MSG_MULTI_AGENT_ACTIVE_TRAJECTORY:
                 rid = data.get("robot_id")
                 if rid is None:
-                    rospy.logwarn("multi_agent_active_trajectory: missing robot_id from agent %s", sending_agent)
+                    _log.warn("multi_agent_active_trajectory: missing robot_id from agent %s", sending_agent)
                     continue
                 sec, nsec = data.get("sec"), data.get("nsec")
                 if sec is None or nsec is None:
-                    rospy.logwarn("multi_agent_active_trajectory: missing execute_at from agent %s", sending_agent)
+                    _log.warn("multi_agent_active_trajectory: missing execute_at from agent %s", sending_agent)
                     continue
                 path_dict = data.get("path")
                 if not isinstance(path_dict, dict):
-                    rospy.logwarn("multi_agent_active_trajectory: invalid path from agent %s", sending_agent)
+                    _log.warn("multi_agent_active_trajectory: invalid path from agent %s", sending_agent)
                     continue
                 new_path = message_converter.convert_dictionary_to_ros_message("nav_msgs/Path", path_dict)
                 for i in range(len(new_path.poses)):
@@ -258,8 +261,8 @@ class SelfDataListener(Listener, TransformMixin):
                 out.waypoint_times = flat
                 out.dds_forward_robot_ids = forward_ids
                 self.multi_agent_active_traj_pub.publish(out)
-                rospy.logdebug(
-                    "dds_own_data_subscriber: multi_agent_active_trajectory from agent %s robot_id=%s active=%s",
+                _log.debug(
+                    "multi_agent_active_trajectory from agent %s robot_id=%s active=%s",
                     sending_agent,
                     out.robot_id,
                     out.active,
@@ -274,8 +277,8 @@ class SelfDataListener(Listener, TransformMixin):
                 if (current_time - message_time).to_sec() > POSITION_INIT_RECENT_THRESHOLD_S:
                     continue
 
-                rospy.logdebug(
-                    "dds_own_data_subscriber: position_init from agent %s x=%s y=%s theta=%s",
+                _log.debug(
+                    "position_init from agent %s x=%s y=%s theta=%s",
                     sending_agent,
                     x,
                     y,
@@ -308,8 +311,8 @@ class SelfDataListener(Listener, TransformMixin):
                 self.send_unknown_images_pub.publish(msg)
 
             elif message_type == MSG_STOP:
-                rospy.loginfo(
-                    "dds_own_data_subscriber: stop from agent %s ts=%s payload=%s -> %s",
+                _log.info(
+                    "stop from agent %s ts=%s payload=%s -> %s",
                     sending_agent,
                     timestamp,
                     data,
@@ -319,15 +322,15 @@ class SelfDataListener(Listener, TransformMixin):
 
             elif message_type == MSG_ROBOT_SHUTDOWN:
                 if not self._allow_dds_roslaunch_shutdown:
-                    rospy.logwarn(
-                        "dds_own_data_subscriber: ignoring robot_shutdown from agent %s (allow_dds_roslaunch_shutdown is false)",
+                    _log.warn(
+                        "ignoring robot_shutdown from agent %s (allow_dds_roslaunch_shutdown is false)",
                         sending_agent,
                     )
                     continue
                 reason = data.get("reason") if isinstance(data, dict) else None
                 extra = " reason=%r" % (reason,) if reason else ""
-                rospy.logwarn(
-                    "dds_own_data_subscriber: robot_shutdown from agent %s ts=%s payload=%s%s; signaling rospy shutdown",
+                _log.warn(
+                    "robot_shutdown from agent %s ts=%s payload=%s%s; signaling rospy shutdown",
                     sending_agent,
                     timestamp,
                     data,
@@ -383,7 +386,7 @@ class OwnDataSubscriber(TransformMixin):
             rospy.spin()
 
     def shutdown(self):
-        print("Shutting down DDS Own Data Subscriber")
+        _log.debug("Shutting down")
         self.data_reader = None
         self.subscriber = None
         self.publisher = None

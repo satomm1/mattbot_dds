@@ -47,6 +47,7 @@ from .messages import (
     make_data_message,
 )
 from .lifecycle import dispose_entity, dispose_participant
+from .logging import DdsLogger
 from .network import (
     RobotIdError,
     get_local_ip,
@@ -92,6 +93,7 @@ __all__ = [
     "PARTICIPANT_LEASE_DURATION_MS",
     "POSITION_INIT_RECENT_THRESHOLD_S",
     "DataMessage",
+    "DdsLogger",
     "EntryExit",
     "Heartbeat",
     "ImageMessage",

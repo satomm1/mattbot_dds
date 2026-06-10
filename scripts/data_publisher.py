@@ -49,6 +49,7 @@ from dds_utils import (
     MSG_STAR_ENCODER_STATE,
     MSG_STAR_GRU_OUT_EGO,
     DataMessage,
+    DdsLogger,
     ROS_TOPIC_TRANSFORMATION_MATRIX,
     RobotIdError,
     TransformMixin,
@@ -59,6 +60,8 @@ from dds_utils import (
     reliable_qos,
     require_robot_id_int,
 )
+
+_log = DdsLogger("data_publisher")
 
 
 class DataPublisher(TransformMixin):
@@ -130,8 +133,8 @@ class DataPublisher(TransformMixin):
                 self._global_observe_start_callback,
                 queue_size=2,
             )
-            rospy.loginfo(
-                "dds_data_publisher: forwarding %s to DDS as %s (ROBOT_ID=%s)",
+            _log.debug(
+                "forwarding %s to DDS as %s (ROBOT_ID=%s)",
                 self._global_observe_dds_trigger_topic,
                 MSG_GLOBAL_OBSERVE_START,
                 self.my_id,
@@ -153,8 +156,8 @@ class DataPublisher(TransformMixin):
             self.multi_robot_goal_plan_callback,
             queue_size=2,
         )
-        rospy.logdebug(
-            "dds_data_publisher: multi-robot plans on %s -> DDS %s (local self -> %s)",
+        _log.debug(
+            "multi-robot plans on %s -> DDS %s (local self -> %s)",
             self._multi_robot_goal_plan_topic,
             MSG_MULTI_ROBOT_GOAL,
             self._external_goal_multi_topic,
@@ -169,8 +172,8 @@ class DataPublisher(TransformMixin):
             self.multi_agent_planned_path_callback,
             queue_size=2,
         )
-        rospy.logdebug(
-            "dds_data_publisher: multi-agent planned paths on %s -> DDS %s",
+        _log.debug(
+            "multi-agent planned paths on %s -> DDS %s",
             self._multi_agent_planned_path_topic,
             MSG_MULTI_AGENT_PLANNED_PATH,
         )
@@ -184,8 +187,8 @@ class DataPublisher(TransformMixin):
             self.multi_agent_collision_report_callback,
             queue_size=10,
         )
-        rospy.logdebug(
-            "dds_data_publisher: multi-agent collision reports on %s -> DDS %s",
+        _log.debug(
+            "multi-agent collision reports on %s -> DDS %s",
             self._multi_agent_collision_report_topic,
             MSG_MULTI_AGENT_COLLISION_REPORT,
         )
@@ -210,8 +213,8 @@ class DataPublisher(TransformMixin):
                 self.multi_agent_execute_at_callback,
                 queue_size=2,
             )
-            rospy.logdebug(
-                "dds_data_publisher: forwarding %s to DDS %s (local echo -> %s)",
+            _log.debug(
+                "forwarding %s to DDS %s (local echo -> %s)",
                 self._multi_agent_execute_at_dds_trigger_topic,
                 MSG_MULTI_AGENT_EXECUTE_AT,
                 self._multi_agent_execute_at_ros_topic,
@@ -237,8 +240,8 @@ class DataPublisher(TransformMixin):
                 self.multi_agent_timing_solve_callback,
                 queue_size=2,
             )
-            rospy.logdebug(
-                "dds_data_publisher: forwarding %s to DDS %s (local echo -> %s)",
+            _log.debug(
+                "forwarding %s to DDS %s (local echo -> %s)",
                 self._multi_agent_timing_solve_for_dds_topic,
                 MSG_MULTI_AGENT_TIMING_SOLVE,
                 self._multi_agent_timing_solve_ros_topic,
@@ -264,15 +267,15 @@ class DataPublisher(TransformMixin):
                 self.multi_agent_active_trajectory_callback,
                 queue_size=2,
             )
-            rospy.logdebug(
-                "dds_data_publisher: forwarding %s to DDS %s (local echo -> %s)",
+            _log.debug(
+                "forwarding %s to DDS %s (local echo -> %s)",
                 self._multi_agent_active_traj_for_dds_topic,
                 MSG_MULTI_AGENT_ACTIVE_TRAJECTORY,
                 self._multi_agent_active_traj_ros_topic,
             )
 
-        rospy.loginfo(
-            "dds_data_publisher: multi-agent DDS bridge (planned_path=%s execute_at=%s timing=%s active_traj=%s)",
+        _log.debug(
+            "multi-agent DDS bridge (planned_path=%s execute_at=%s timing=%s active_traj=%s)",
             self._multi_agent_planned_path_topic,
             bool(self._forward_multi_agent_execute_at),
             bool(self._forward_multi_agent_timing_solve),
@@ -291,8 +294,8 @@ class DataPublisher(TransformMixin):
             self._air_quality_dds_timer,
             oneshot=False,
         )
-        rospy.loginfo(
-            "dds_data_publisher: /air_quality -> DDS %s every %.1f s",
+        _log.debug(
+            "/air_quality -> DDS %s every %.1f s",
             MSG_AIR_QUALITY,
             air_quality_period,
         )
@@ -363,8 +366,8 @@ class DataPublisher(TransformMixin):
                 out.target_agent = rid
                 out.fleet_robot_ids = fleet_ids
                 self._pub_external_goal_multi_local.publish(out)
-                rospy.logdebug(
-                    "dds_data_publisher: local multi-robot goal (self): plan_id=%s robot=%s",
+                _log.debug(
+                    "local multi-robot goal (self): plan_id=%s robot=%s",
                     plan_id,
                     rid,
                 )
@@ -382,8 +385,8 @@ class DataPublisher(TransformMixin):
             dm = make_data_message(MSG_MULTI_ROBOT_GOAL, aid_sender, payload)
             writer = self._get_writer_for_target(rid)
             writer.write(dm)
-            rospy.logdebug(
-                "dds_data_publisher: sent %s to DataTopic%s plan_id=%s",
+            _log.debug(
+                "sent %s to DataTopic%s plan_id=%s",
                 MSG_MULTI_ROBOT_GOAL,
                 rid,
                 plan_id,
@@ -395,7 +398,7 @@ class DataPublisher(TransformMixin):
         aid = self._sender_id_optional()
         fleet_ids = [int(x) for x in (msg.fleet_robot_ids or [])]
         if not fleet_ids:
-            rospy.logwarn("dds_data_publisher: multi_agent_timing_solve missing fleet_robot_ids; skipping DDS")
+            _log.warn("multi_agent_timing_solve missing fleet_robot_ids; skipping DDS")
             return
         payload = {
             "plan_id": str(msg.plan_id),
@@ -408,16 +411,16 @@ class DataPublisher(TransformMixin):
         for rid in fleet_ids:
             if rid == my_id_int:
                 self._pub_timing_solve_local.publish(msg)
-                rospy.logdebug(
-                    "dds_data_publisher: local multi_agent_timing_solve plan_id=%s source=%s",
+                _log.debug(
+                    "local multi_agent_timing_solve plan_id=%s source=%s",
                     msg.plan_id,
                     msg.source_agent,
                 )
                 continue
             dm = make_data_message(MSG_MULTI_AGENT_TIMING_SOLVE, aid, payload)
             self._get_writer_for_target(rid).write(dm)
-            rospy.logdebug(
-                "dds_data_publisher: sent %s to DataTopic%s plan_id=%s",
+            _log.debug(
+                "sent %s to DataTopic%s plan_id=%s",
                 MSG_MULTI_AGENT_TIMING_SOLVE,
                 rid,
                 msg.plan_id,
@@ -442,8 +445,8 @@ class DataPublisher(TransformMixin):
         forward = [int(x) for x in (msg.dds_forward_robot_ids or [])]
         if not forward:
             self._pub_active_traj_local.publish(msg)
-            rospy.logdebug(
-                "dds_data_publisher: local multi_agent_active_trajectory robot=%s plan_id=%s active=%s",
+            _log.debug(
+                "local multi_agent_active_trajectory robot=%s plan_id=%s active=%s",
                 msg.robot_id,
                 msg.plan_id,
                 msg.active,
@@ -452,16 +455,16 @@ class DataPublisher(TransformMixin):
         for rid in forward:
             if rid == my_id_int:
                 self._pub_active_traj_local.publish(msg)
-                rospy.logdebug(
-                    "dds_data_publisher: local multi_agent_active_trajectory robot=%s plan_id=%s",
+                _log.debug(
+                    "local multi_agent_active_trajectory robot=%s plan_id=%s",
                     msg.robot_id,
                     msg.plan_id,
                 )
                 continue
             dm = make_data_message(MSG_MULTI_AGENT_ACTIVE_TRAJECTORY, aid, payload)
             self._get_writer_for_target(rid).write(dm)
-            rospy.logdebug(
-                "dds_data_publisher: sent %s to DataTopic%s robot=%s",
+            _log.debug(
+                "sent %s to DataTopic%s robot=%s",
                 MSG_MULTI_AGENT_ACTIVE_TRAJECTORY,
                 rid,
                 msg.robot_id,
@@ -483,7 +486,7 @@ class DataPublisher(TransformMixin):
         aid = self._sender_id_optional()
         fleet_ids = [int(x) for x in (msg.fleet_robot_ids or [])]
         if not fleet_ids:
-            rospy.logwarn("dds_data_publisher: multi_agent_execute_at missing fleet_robot_ids; skipping DDS")
+            _log.warn("multi_agent_execute_at missing fleet_robot_ids; skipping DDS")
             return
         payload = {
             "plan_id": str(msg.plan_id),
@@ -495,16 +498,16 @@ class DataPublisher(TransformMixin):
         for rid in fleet_ids:
             if rid == my_id_int:
                 self._pub_execute_at_local.publish(msg)
-                rospy.logdebug(
-                    "dds_data_publisher: local multi_agent_execute_at plan_id=%s execute_at=%s",
+                _log.debug(
+                    "local multi_agent_execute_at plan_id=%s execute_at=%s",
                     msg.plan_id,
                     msg.execute_at,
                 )
                 continue
             dm = make_data_message(MSG_MULTI_AGENT_EXECUTE_AT, aid, payload)
             self._get_writer_for_target(rid).write(dm)
-            rospy.logdebug(
-                "dds_data_publisher: sent %s to DataTopic%s plan_id=%s",
+            _log.debug(
+                "sent %s to DataTopic%s plan_id=%s",
                 MSG_MULTI_AGENT_EXECUTE_AT,
                 rid,
                 msg.plan_id,
@@ -609,8 +612,8 @@ class DataPublisher(TransformMixin):
             "sent_stamp": float(msg.sent_stamp),
         }
         self._publish_data(MSG_MULTI_AGENT_COLLISION_REPORT, payload)
-        rospy.logdebug(
-            "dds_data_publisher: sent %s plan_id=%s pair=(%s,%s) segments=%d complete=%s",
+        _log.debug(
+            "sent %s plan_id=%s pair=(%s,%s) segments=%d complete=%s",
             MSG_MULTI_AGENT_COLLISION_REPORT,
             msg.plan_id,
             msg.robot_i,
@@ -633,8 +636,8 @@ class DataPublisher(TransformMixin):
             "path": message_converter.convert_ros_message_to_dictionary(path_msg),
         }
         self._publish_data(MSG_MULTI_AGENT_PLANNED_PATH, payload)
-        rospy.logdebug(
-            "dds_data_publisher: sent %s plan_id=%s poses=%d",
+        _log.debug(
+            "sent %s plan_id=%s poses=%d",
             MSG_MULTI_AGENT_PLANNED_PATH,
             msg.plan_id,
             len(path_msg.poses),
@@ -678,7 +681,7 @@ class DataPublisher(TransformMixin):
             rospy.spin()
 
     def shutdown(self):
-        print("Shutting down DDS data publisher")
+        _log.debug("Shutting down")
         self._target_data_writers.clear()
         self.data_writer = None
         self.publisher = None

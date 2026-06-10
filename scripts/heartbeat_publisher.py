@@ -9,6 +9,7 @@ from cyclonedds.pub import Publisher, DataWriter
 
 from dds_utils import (
     DEFAULT_AGENT_TYPE,
+    DdsLogger,
     HEARTBEAT_PERIOD,
     HEARTBEAT_STARTUP_DELAY_S,
     HEARTBEAT_TOPIC,
@@ -22,6 +23,8 @@ from dds_utils import (
     get_local_ip,
     require_robot_id_int,
 )
+
+_log = DdsLogger("heartbeat_publisher")
 
 
 class HeartbeatPublisher(TransformMixin):
@@ -86,7 +89,7 @@ class HeartbeatPublisher(TransformMixin):
             rospy.sleep(HEARTBEAT_PERIOD)
 
     def shutdown(self):
-        rospy.loginfo("Shutting down DDS heartbeat publisher...")
+        _log.debug("Shutting down")
         self.heartbeat_writer = None
         self.publisher = None
         dispose_participant(self.participant)
@@ -96,7 +99,7 @@ class HeartbeatPublisher(TransformMixin):
 if __name__ == "__main__":
     heartbeat_publisher = HeartbeatPublisher()
     startup_delay = rospy.get_param("~startup_delay", HEARTBEAT_STARTUP_DELAY_S)
-    rospy.loginfo("Waiting %.1fs before publishing heartbeats (entry_exit join window)", startup_delay)
+    _log.debug("Waiting %.1fs before publishing heartbeats (entry_exit join window)", startup_delay)
     time.sleep(startup_delay)
     rospy.on_shutdown(heartbeat_publisher.shutdown)
     heartbeat_publisher.run()

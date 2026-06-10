@@ -12,6 +12,7 @@ from dds_utils import (
     HEARTBEAT_STARTUP_DELAY_S,
     HEARTBEAT_TIMEOUT,
     HEARTBEAT_TOPIC,
+    DdsLogger,
     Heartbeat,
     ROS_TOPIC_ENTRY_AGENTS,
     ROS_TOPIC_EXITED_AGENTS,
@@ -23,6 +24,8 @@ from dds_utils import (
     get_local_ip,
     require_robot_id_int,
 )
+
+_log = DdsLogger("heartbeat_subscriber")
 
 
 class HeartbeatListener(Listener):
@@ -84,7 +87,6 @@ class HeartbeatSubscriber:
         self.my_id = str(self.my_id_int)
 
         self.my_ip = get_local_ip()
-        print(f"My IP address is {self.my_ip}")
 
         # Dictionary to store agents in the environment
         self.agents = dict()
@@ -149,7 +151,7 @@ class HeartbeatSubscriber:
                     if agent_id in self.agents:
                         self.agents[agent_id]["timestamp"] = heartbeats[agent_id]
                     else:
-                        print(f"Detected heartbeat from unknown agent {agent_id}")
+                        _log.info("Detected heartbeat from unknown agent %s", agent_id)
                         self.agents[agent_id] = {"timestamp": heartbeats[agent_id]}
                         update_to_active_agents = True
 
@@ -167,7 +169,7 @@ class HeartbeatSubscriber:
 
                     time_difference = current_time - agent_info["timestamp"]
                     if time_difference > HEARTBEAT_TIMEOUT:
-                        print(f"Agent {agent_id} has timed out")
+                        _log.warn("Agent %s has timed out", agent_id)
                         dead_agents.append(agent_id)
 
                 for agent_id in dead_agents:
@@ -182,7 +184,7 @@ class HeartbeatSubscriber:
             time.sleep(1)
 
     def shutdown(self):
-        rospy.loginfo("Shutting down DDS heartbeat subscriber...")
+        _log.debug("Shutting down")
         self.heartbeat_reader = None
         self.subscriber = None
         dispose_participant(self.participant)
@@ -192,7 +194,7 @@ class HeartbeatSubscriber:
 if __name__ == "__main__":
     heartbeat_subscriber = HeartbeatSubscriber()
     startup_delay = rospy.get_param("~startup_delay", HEARTBEAT_STARTUP_DELAY_S)
-    rospy.loginfo("Waiting %.1fs before tracking heartbeats (entry_exit join window)", startup_delay)
+    _log.debug("Waiting %.1fs before tracking heartbeats (entry_exit join window)", startup_delay)
     time.sleep(startup_delay)
     rospy.on_shutdown(heartbeat_subscriber.shutdown)
     heartbeat_subscriber.run()
