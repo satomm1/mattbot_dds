@@ -96,7 +96,6 @@ class EntryExitListener(Listener):
 
     Methods:
     - on_data_available(reader): Callback method for handling incoming data.
-    - find_if_closest_robot(robot_hash): Determines if the given robot is the closest robot to the current agent.
     - agent_update_available(): Checks if there are updates to be sent to agents.
     - get_agents(): Retrieves the active agents, exited agents, and lost agents.
     - update_agents(agents): Updates the active agents.
@@ -156,21 +155,19 @@ class EntryExitListener(Listener):
                 if not self.ready_to_welcome or not self.known_points:
                     continue
 
-                new_robot_hash = hash_robot_id(str(sample.agent_id))
-                if self.find_if_closest_robot(new_robot_hash):
-                    print(f"Agent {sample.agent_id} of type '{sample.agent_type}' is requesting entry")
+                print(f"Agent {sample.agent_id} of type '{sample.agent_type}' is requesting entry")
 
-                    agents_message = json.dumps(self.agents)
-                    known_points_json = json.dumps(self.known_points)
+                agents_message = json.dumps(self.agents)
+                known_points_json = json.dumps(self.known_points)
 
-                    init_message = Initialization(
-                        target_agent=sample.agent_id,
-                        sending_agent=self.my_id_int,
-                        agents=agents_message,
-                        known_points=known_points_json,
-                    )
-                    self.init_writer.write(init_message)
-                    time.sleep(INTER_DDS_WRITE_SLEEP_S)
+                init_message = Initialization(
+                    target_agent=sample.agent_id,
+                    sending_agent=self.my_id_int,
+                    agents=agents_message,
+                    known_points=known_points_json,
+                )
+                self.init_writer.write(init_message)
+                time.sleep(INTER_DDS_WRITE_SLEEP_S)
             elif sample.action == "initialized":
 
                 # Only if the sample.timestamp is recent
@@ -198,35 +195,6 @@ class EntryExitListener(Listener):
                     self.agents.pop(sample.agent_id)  # Pop from agents dictionary
                     self.exited_agents[sample.agent_id] = int(time.time())  # Add to exited agents dictionary
                     self.update_to_agents = True
-
-    def find_if_closest_robot(self, robot_hash):
-        """
-        Finds if the given robot is the closest robot to the current agent.
-        The closest robot is the robot that has the smallest difference in hash value
-
-        Parameters:
-        - robot_hash (int): The hash value of the robot.
-
-        Returns:
-        - bool: True if the given robot is the closest robot, False otherwise.
-        """
-        my_distance = abs(self.my_hash - robot_hash)
-
-        # Loop through all agents to see if there is a closer robot (by hash)
-        for agent_id, agent_info in self.agents.items():
-            if agent_id == self.my_id_int:
-                continue
-            agent_hash = agent_info.get("hash")
-            if agent_hash is None:
-                continue
-
-            distance = abs(agent_hash - robot_hash)
-            if distance < my_distance and distance != 0:
-                print("I will not provide initialization.")  # I am not the closest robot
-                return False
-
-        # print('I will provide initialization.')  # I am the closest robot
-        return True
 
     def agent_update_available(self):
         """
@@ -322,17 +290,23 @@ class InitializationListener(Listener):
             if sample.target_agent != self.my_id_int:
                 continue
 
-            # Apply reference points first so a bad agents payload cannot block join.
             try:
                 known_points = json.loads(sample.known_points)
-                self.reference_known_points = known_points
-                self.known_points_received = True
-                print("    Reference points received through initialization message")
             except (json.JSONDecodeError, TypeError) as exc:
                 rospy.logwarn("Initialization known_points parse failed: %s", exc)
                 continue
 
-            agent_dict = json.loads(sample.agents)
+            if not self.known_points_received:
+                self.reference_known_points = known_points
+                self.known_points_received = True
+                print("    Reference points received through initialization message")
+
+            try:
+                agent_dict = json.loads(sample.agents)
+            except (json.JSONDecodeError, TypeError) as exc:
+                rospy.logwarn("Initialization agents parse failed: %s", exc)
+                continue
+
             for agent_id, agent_info in agent_dict.items():
                 try:
                     aid = int(agent_id)
@@ -340,6 +314,8 @@ class InitializationListener(Listener):
                     rospy.logwarn("Skipping initialization agent id %r", agent_id)
                     continue
                 if aid == self.my_id_int:
+                    continue
+                if aid in self.agents:
                     continue
                 if not isinstance(agent_info, dict):
                     continue
