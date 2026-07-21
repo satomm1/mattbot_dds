@@ -11,6 +11,14 @@
     <arg name="multi_agent_execute_at_dds_trigger_topic" default="/multi_agent_execute_at_dds"/>
     <arg name="multi_agent_execute_at_ros_topic" default="/multi_agent_execute_at"/>
 
+    <arg name="publish_images" default="true"/>
+    <arg name="image_topic" default="/camera/color/image_raw"/>
+    <arg name="image_publish_rate_hz" default="2.0"/>
+    <arg name="image_jpeg_quality" default="80"/>
+    <arg name="image_max_width" default="640"/>
+    <!-- Upside-down camera on tall robots: 180° rotate before JPEG (same as capture/OSOD). -->
+    <arg name="tall" default="false"/>
+
     <node name="agent_entry_exit" pkg="mattbot_dds" type="entry_exit.py" output="screen"/>
     <node name="heartbeat_publisher" pkg="mattbot_dds" type="heartbeat_publisher.py" output="screen"/>
     <node name="heartbeat_subscriber" pkg="mattbot_dds" type="heartbeat_subscriber.py" output="screen"/>
@@ -36,5 +44,13 @@
     <node name="own_data_subscriber" pkg="mattbot_dds" type="own_data_subscriber.py" output="screen" required="true">
         <param name="sqlite" value="$(arg sqlite)"/>
         <param name="multi_agent_execute_at_ros_topic" value="$(arg multi_agent_execute_at_ros_topic)"/>
+    </node>
+
+    <node if="$(arg publish_images)" name="image_publisher" pkg="mattbot_dds" type="image_publisher.py" output="screen">
+        <param name="image_topic" value="$(arg image_topic)"/>
+        <param name="publish_rate_hz" value="$(arg image_publish_rate_hz)"/>
+        <param name="jpeg_quality" value="$(arg image_jpeg_quality)"/>
+        <param name="max_width" value="$(arg image_max_width)"/>
+        <param name="tall" value="$(arg tall)"/>
     </node>
 </launch>

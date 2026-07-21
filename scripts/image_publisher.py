@@ -1,12 +1,16 @@
-import rospy
-from sensor_msgs.msg import Image
 import sys
 import time
+
+import cv2
+import rospy
+from cv_bridge import CvBridge, CvBridgeError
+from sensor_msgs.msg import Image
 
 from cyclonedds.topic import Topic
 from cyclonedds.pub import Publisher, DataWriter
 
 from dds_utils import (
+    DdsLogger,
     ImageMessage,
     RobotIdError,
     create_domain_participant,
@@ -15,6 +19,8 @@ from dds_utils import (
     reliable_qos,
     require_robot_id_int,
 )
+
+_log = DdsLogger("image_publisher")
 
 
 class ImagePublisher:
@@ -29,43 +35,105 @@ class ImagePublisher:
             sys.exit(1)
         self.my_id = str(self.my_id_int)
 
+        self.image_topic_ros = rospy.get_param("~image_topic", "/camera/color/image_raw")
+        self.publish_rate_hz = float(rospy.get_param("~publish_rate_hz", 2.0))
+        self.jpeg_quality = int(rospy.get_param("~jpeg_quality", 80))
+        self.max_width = int(rospy.get_param("~max_width", 640))
+        # Tall mount: camera is upside-down (same as capture / OSOD).
+        self.tall = bool(rospy.get_param("~tall", False))
+        self._min_period_s = (1.0 / self.publish_rate_hz) if self.publish_rate_hz > 0 else 0.0
+        self._last_publish_time = 0.0
+        self._bridge = CvBridge()
+
         self.participant = create_domain_participant(domain_qos=True)
         self.publisher = Publisher(self.participant)
 
-        # Create my image topic
-        self.image_topic = Topic(self.participant, image_topic_name(self.my_id_int), ImageMessage)
+        topic_name = image_topic_name(self.my_id_int)
+        self.image_topic = Topic(self.participant, topic_name, ImageMessage)
         self.image_writer = DataWriter(self.publisher, self.image_topic, qos=reliable_qos)
 
-        # Create a subscriber for the image topic
-        self.image_subscriber = rospy.Subscriber("/camera/color/image_raw", Image, self.image_callback)
-
-    def image_callback(self, msg):
-        # Convert ROS Image message to DDS ImageMessage
-        image_message = ImageMessage(
-            agent_id=self.my_id_int,
-            timestamp=int(time.time()),  # Convert to milliseconds
-            data=msg.data,
-            width=msg.width,
-            height=msg.height,
-            encoding=msg.encoding
+        self.image_subscriber = rospy.Subscriber(
+            self.image_topic_ros, Image, self.image_callback, queue_size=1
+        )
+        _log.debug(
+            "publishing %s -> DDS %s (rate=%.1f Hz jpeg_quality=%d max_width=%d tall=%s)",
+            self.image_topic_ros,
+            topic_name,
+            self.publish_rate_hz,
+            self.jpeg_quality,
+            self.max_width,
+            self.tall,
         )
 
-        # Publish the image message
+    def _encode_jpeg(self, msg):
+        try:
+            cv_image = self._bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
+        except CvBridgeError as exc:
+            return None, None, None, "cv_bridge error: %s" % exc
+
+        if self.tall:
+            cv_image = cv2.rotate(cv_image, cv2.ROTATE_180)
+
+        height, width = cv_image.shape[:2]
+        if self.max_width > 0 and width > self.max_width:
+            scale = float(self.max_width) / float(width)
+            new_w = self.max_width
+            new_h = max(1, int(round(height * scale)))
+            cv_image = cv2.resize(cv_image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            height, width = new_h, new_w
+
+        ok, encoded = cv2.imencode(
+            ".jpg", cv_image, [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality]
+        )
+        if not ok:
+            return None, None, None, "jpeg encode failed"
+        return encoded.tobytes(), width, height, None
+
+    def image_callback(self, msg):
+        now = time.time()
+        if self._min_period_s > 0 and (now - self._last_publish_time) < self._min_period_s:
+            return
+
+        jpeg_bytes, width, height, err = self._encode_jpeg(msg)
+        if err is not None:
+            _log.warn("skip frame: %s", err)
+            return
+
+        image_message = ImageMessage(
+            agent_id=self.my_id_int,
+            timestamp=int(now),
+            data=list(jpeg_bytes),
+            width=width,
+            height=height,
+            encoding="jpeg",
+        )
         self.image_writer.write(image_message)
-        rospy.loginfo(f"Published image from agent {self.my_id} at timestamp {image_message.timestamp}")
+        self._last_publish_time = now
+        _log.debug(
+            "published JPEG %dx%d (%d bytes) agent=%s ts=%s",
+            width,
+            height,
+            len(jpeg_bytes),
+            self.my_id,
+            image_message.timestamp,
+        )
 
     def run(self):
-        rospy.loginfo("Image Publisher is running...")
+        rospy.loginfo(
+            "DDS image publisher running: %s -> %s",
+            self.image_topic_ros,
+            image_topic_name(self.my_id_int),
+        )
         rospy.spin()
 
     def shutdown(self):
-        rospy.logdebug("Shutting down Image Publisher")
-        self.image_subscriber.unregister()
+        _log.debug("Shutting down")
+        if self.image_subscriber is not None:
+            self.image_subscriber.unregister()
         self.image_writer = None
         self.publisher = None
         dispose_participant(self.participant)
         self.participant = None
-        rospy.loginfo("Image Publisher shutdown complete.")
 
 
 if __name__ == "__main__":

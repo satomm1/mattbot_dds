@@ -79,7 +79,7 @@ Agents must subscribe to the shared ROS transform (`transformation_matrix` / `/t
 | `data_publisher.py` | `dds_data_publisher` | ROS → DDS: objects, paths, goals, invalid goals, faces, multi-robot plans, optional STAR tensors, optional `global_observe_start` forwarding, air quality (`MSG_AIR_QUALITY` from `/air_quality`, default every 10 s) |
 | `data_subscriber.py` | `dds_data_subscriber` | DDS (peers) → ROS: e.g. `/object_from_agent`, `/object_from_sensor`, `/path_from_agent`, `/map_update`, `/new_face_encoding`, `/team/dds/...`, latched global observe relay |
 | `own_data_subscriber.py` | `dds_own_data_subscriber` | DDS (**this** `DataTopic`) → ROS: `/external_goal`, `/external_goal_multi`, `/initialpose`, `/send_unknown_images`, **`/stop`**; optional **`robot_shutdown`** → `rospy.signal_shutdown` (required node) |
-| `image_publisher.py` | (not in `dds.launch` by default) | Image DDS bridge when you run it explicitly |
+| `image_publisher.py` | `image_publisher` (when `publish_images:=true`) | JPEG camera frames → DDS `ImageTopic{ROBOT_ID}` (`encoding="jpeg"`); params `~image_topic`, `~publish_rate_hz` (default 2), `~jpeg_quality` (80), `~max_width` (640), `~tall` (180° rotate when camera is upside-down) |
 
 Deprecated and test helpers live under `scripts/deprecated/` and `scripts/testing/`.
 
@@ -94,6 +94,12 @@ Deprecated and test helpers live under `scripts/deprecated/` and `scripts/testin
 | `relay_global_observe_start_from_dds` | `true` | `data_subscriber`: DDS → ROS latched wall time |
 | `global_observe_start_ros_topic` | `/global_observe_start` | Output topic for relay |
 | `global_observe_start_dds_trigger_topic` | `/global_observe_start_dds` | Input topic for forwarder (avoids echoing `/global_observe_start` back onto DDS) |
+| `publish_images` | `true` | Start `image_publisher` (JPEG → `ImageTopic{ROBOT_ID}`) |
+| `image_topic` | `/camera/color/image_raw` | ROS image source for DDS publish |
+| `image_publish_rate_hz` | `2.0` | Max DDS image publish rate |
+| `image_jpeg_quality` | `80` | OpenCV JPEG quality (0–100) |
+| `image_max_width` | `640` | Downscale before JPEG if wider; `0` = no resize |
+| `tall` | `false` | Pass to `image_publisher`: 180° rotate before JPEG (upside-down tall mount) |
 
 On `data_publisher`, private param `~air_quality_publish_period_s` (default **10.0**) sets how often `/air_quality` is forwarded to DDS as `MSG_AIR_QUALITY` (`"air_quality"`). JSON `data`: `temperature` (°F), `relative_humidity` (%), `voc_index`, `nox_index`. Consumers read `DataTopic{agent_id}` where `sending_agent == agent_id`.
 
