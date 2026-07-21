@@ -180,7 +180,9 @@ class LocationPublisher(TransformMixin):
                 transformed_point = self.transform_point([x, y, theta])
                 x_new, y_new, theta_new = transformed_point
                 
-                location = Location(self.my_id_int, int(time.time()), x_new, y_new, theta_new, self.is_static)
+                location = Location(
+                    self.my_id_int, float(time.time()), x_new, y_new, theta_new, self.is_static
+                )
                 self.location_writer.write(location)
 
             except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:

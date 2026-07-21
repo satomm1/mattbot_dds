@@ -99,9 +99,12 @@ class ImagePublisher:
             _log.warn("skip frame: %s", err)
             return
 
+        # Prefer camera capture stamp when present; else wall clock (fractional Unix seconds).
+        stamp = msg.header.stamp.to_sec() if msg.header.stamp.to_sec() > 0.0 else float(now)
+
         image_message = ImageMessage(
             agent_id=self.my_id_int,
-            timestamp=int(now),
+            timestamp=float(stamp),
             data=list(jpeg_bytes),
             width=width,
             height=height,
