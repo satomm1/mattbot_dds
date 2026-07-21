@@ -102,6 +102,8 @@ class DataListener(Listener, TransformMixin):
                 timestamp = sample.timestamp
                 data = json.loads(sample.data)
                 if message_type == MSG_DETECTED_OBJECT:
+                    # Payload may include fractional Unix seconds; not a DetectedObject field.
+                    object_timestamp = data.pop("timestamp", timestamp)
                     new_object = message_converter.convert_dictionary_to_ros_message(
                         "mattbot_image_detection/DetectedObject", data
                     )
@@ -114,7 +116,11 @@ class DataListener(Listener, TransformMixin):
                     new_object.pose.position.y = new_point[1]
 
                     self.object_publisher.publish(new_object)
-                    _log.info("Received object from agent %s", self.topic_id)
+                    _log.info(
+                        "Received object from agent %s (timestamp=%s)",
+                        self.topic_id,
+                        object_timestamp,
+                    )
 
                     if self.db is not None:
                         self.db.add_object(
@@ -122,7 +128,7 @@ class DataListener(Listener, TransformMixin):
                             new_object.pose.position.x,
                             new_object.pose.position.y,
                             self.topic_id,
-                            timestamp,
+                            object_timestamp,
                         )
                 elif message_type == MSG_SENSOR_DETECTED_OBJECTS:
                     x = data["x"]

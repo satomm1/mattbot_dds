@@ -545,14 +545,17 @@ class DataPublisher(TransformMixin):
         msg.pose.position.x = new_point[0]
         msg.pose.position.y = new_point[1]
 
-        self._publish_data(
-            MSG_DETECTED_OBJECT,
-            message_converter.convert_ros_message_to_dictionary(msg),
-        )
+        stamp = float(time.time())
+        payload = message_converter.convert_ros_message_to_dictionary(msg)
+        payload["timestamp"] = stamp
+
+        self._publish_data(MSG_DETECTED_OBJECT, payload)
 
         if self.db is not None:
             # Save the object to the SQLite database
-            self.db.add_object(msg.class_name, msg.pose.position.x, msg.pose.position.y, self.my_id, int(time.time()))
+            self.db.add_object(
+                msg.class_name, msg.pose.position.x, msg.pose.position.y, self.my_id, stamp
+            )
 
     def labeled_callback(self, msg):
         for obj in msg.objects:
@@ -564,10 +567,9 @@ class DataPublisher(TransformMixin):
             new_msg.pose.position.x = new_point[0]
             new_msg.pose.position.y = new_point[1]
 
-            self._publish_data(
-                MSG_LLM_DETECTED_OBJECT,
-                message_converter.convert_ros_message_to_dictionary(new_msg),
-            )
+            payload = message_converter.convert_ros_message_to_dictionary(new_msg)
+            payload["timestamp"] = float(time.time())
+            self._publish_data(MSG_LLM_DETECTED_OBJECT, payload)
 
     def detected_object_callback(self, msg):
         for obj in msg.objects:
@@ -582,10 +584,9 @@ class DataPublisher(TransformMixin):
                 new_msg.pose.position.x = new_point[0]
                 new_msg.pose.position.y = new_point[1]
 
-                self._publish_data(
-                    MSG_PERSON_DETECTED,
-                    message_converter.convert_ros_message_to_dictionary(new_msg),
-                )
+                payload = message_converter.convert_ros_message_to_dictionary(new_msg)
+                payload["timestamp"] = float(time.time())
+                self._publish_data(MSG_PERSON_DETECTED, payload)
 
     def path_callback(self, msg):
 
