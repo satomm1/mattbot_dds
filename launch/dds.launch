@@ -13,7 +13,7 @@
 
     <arg name="publish_images" default="true"/>
     <arg name="image_topic" default="/camera/color/image_raw"/>
-    <arg name="image_publish_rate_hz" default="10.0"/>
+    <arg name="image_publish_rate_hz" default="4.0"/>
     <arg name="image_jpeg_quality" default="80"/>
     <arg name="image_max_width" default="640"/>
     <!-- Upside-down camera on tall robots: 180° rotate before JPEG (same as capture/OSOD). -->
