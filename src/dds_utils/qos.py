@@ -23,3 +23,10 @@ best_effort_qos = Qos(
         lease_duration=duration(milliseconds=PARTICIPANT_LEASE_DURATION_MS)
     ),
 )
+
+# Live camera previews: drop late/lost frames instead of Reliable retransmit backlog.
+image_qos = Qos(
+    Policy.Reliability.BestEffort,
+    Policy.Durability.Volatile,
+    Policy.History.KeepLast(depth=1),
+)

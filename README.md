@@ -79,7 +79,7 @@ Agents must subscribe to the shared ROS transform (`transformation_matrix` / `/t
 | `data_publisher.py` | `dds_data_publisher` | ROS → DDS: objects, paths, goals, invalid goals, faces, multi-robot plans, optional STAR tensors, optional `global_observe_start` forwarding, air quality (`MSG_AIR_QUALITY` from `/air_quality`, default every 10 s) |
 | `data_subscriber.py` | `dds_data_subscriber` | DDS (peers) → ROS: e.g. `/object_from_agent`, `/object_from_sensor`, `/path_from_agent`, `/map_update`, `/new_face_encoding`, `/team/dds/...`, latched global observe relay |
 | `own_data_subscriber.py` | `dds_own_data_subscriber` | DDS (**this** `DataTopic`) → ROS: `/external_goal`, `/external_goal_multi`, `/initialpose`, `/send_unknown_images`, **`/stop`**; optional **`robot_shutdown`** → `rospy.signal_shutdown` (required node) |
-| `image_publisher.py` | `image_publisher` (when `publish_images:=true`) | JPEG camera frames → DDS `ImageTopic{ROBOT_ID}` (`encoding="jpeg"`); params `~image_topic`, `~publish_rate_hz` (default 2), `~jpeg_quality` (80), `~max_width` (640), `~tall` (180° rotate when camera is upside-down) |
+| `image_publisher.py` | `image_publisher` (when `publish_images:=true`) | JPEG camera frames → DDS `ImageTopic{ROBOT_ID}` (`encoding="jpeg"`); QoS `image_qos` (BestEffort + Volatile + KeepLast(1)); params `~image_topic`, `~publish_rate_hz` (default 2), `~jpeg_quality` (80), `~max_width` (640), `~tall` (180° rotate when camera is upside-down) |
 
 Deprecated and test helpers live under `scripts/deprecated/` and `scripts/testing/`.
 

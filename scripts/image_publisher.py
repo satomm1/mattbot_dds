@@ -15,8 +15,8 @@ from dds_utils import (
     RobotIdError,
     create_domain_participant,
     dispose_participant,
+    image_qos,
     image_topic_name,
-    reliable_qos,
     require_robot_id_int,
 )
 
@@ -50,7 +50,7 @@ class ImagePublisher:
 
         topic_name = image_topic_name(self.my_id_int)
         self.image_topic = Topic(self.participant, topic_name, ImageMessage)
-        self.image_writer = DataWriter(self.publisher, self.image_topic, qos=reliable_qos)
+        self.image_writer = DataWriter(self.publisher, self.image_topic, qos=image_qos)
 
         self.image_subscriber = rospy.Subscriber(
             self.image_topic_ros, Image, self.image_callback, queue_size=1
