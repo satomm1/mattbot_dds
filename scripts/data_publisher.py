@@ -104,6 +104,11 @@ class DataPublisher(TransformMixin):
         self.invalid_goal_subscriber = rospy.Subscriber("/invalid_goal", Pose2D, self.invalid_goal_callback, queue_size=10)
         self.detected_object_subscriber = rospy.Subscriber("/detected_objects", DetectedObjectArray, self.detected_object_callback, queue_size=10)
 
+        # Rate limit outbound person detections. 0 or negative disables the limit.
+        person_rate_hz = float(rospy.get_param("~person_detected_publish_rate_hz", 3.0))
+        self._person_min_period_s = (1.0 / person_rate_hz) if person_rate_hz > 0.0 else 0.0
+        self._last_person_publish_t = 0.0
+
         self._star_enc_topic = rospy.get_param("~star_encoder_ros_topic", "").strip()
         self._star_gru_topic = rospy.get_param("~star_gru_out_ego_ros_topic", "").strip()
         self._sub_star_enc = None
@@ -576,6 +581,15 @@ class DataPublisher(TransformMixin):
             self._publish_data(MSG_LLM_DETECTED_OBJECT, payload)
 
     def detected_object_callback(self, msg):
+        # Rate limit: skip this batch if we published persons too recently. The window is
+        # only consumed when a person is actually published, so person-free frames don't
+        # count against the limit.
+        if self._person_min_period_s > 0.0:
+            now = time.monotonic()
+            if (now - self._last_person_publish_t) < self._person_min_period_s:
+                return
+
+        published_person = False
         for obj in msg.objects:
             class_name = obj.class_name
             if class_name == "person":
@@ -591,6 +605,10 @@ class DataPublisher(TransformMixin):
                 payload = message_converter.convert_ros_message_to_dictionary(new_msg)
                 payload["timestamp"] = float(time.time())
                 self._publish_data(MSG_PERSON_DETECTED, payload)
+                published_person = True
+
+        if published_person:
+            self._last_person_publish_t = time.monotonic()
 
     def path_callback(self, msg):
 
