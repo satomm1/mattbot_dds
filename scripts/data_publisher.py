@@ -589,7 +589,7 @@ class DataPublisher(TransformMixin):
             if (now - self._last_person_publish_t) < self._person_min_period_s:
                 return
 
-        published_person = False
+        persons = []
         for obj in msg.objects:
             class_name = obj.class_name
             if class_name == "person":
@@ -602,13 +602,16 @@ class DataPublisher(TransformMixin):
                 new_msg.pose.position.x = new_point[0]
                 new_msg.pose.position.y = new_point[1]
 
-                payload = message_converter.convert_ros_message_to_dictionary(new_msg)
-                payload["timestamp"] = float(time.time())
-                self._publish_data(MSG_PERSON_DETECTED, payload)
-                published_person = True
+                persons.append(message_converter.convert_ros_message_to_dictionary(new_msg))
 
-        if published_person:
-            self._last_person_publish_t = time.monotonic()
+        if not persons:
+            return
+
+        self._publish_data(
+            MSG_PERSON_DETECTED,
+            {"timestamp": float(time.time()), "objects": persons},
+        )
+        self._last_person_publish_t = time.monotonic()
 
     def path_callback(self, msg):
 

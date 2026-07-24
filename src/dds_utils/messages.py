@@ -131,6 +131,7 @@ MSG_MULTI_AGENT_COLLISION_REPORT = "multi_agent_collision_report"
 
 MSG_DETECTED_OBJECT = "detected_object"
 MSG_LLM_DETECTED_OBJECT = "llm_detected_object"
+# JSON: {"timestamp": float, "objects": [DetectedObject dict, ...]} — all persons from one frame
 MSG_PERSON_DETECTED = "person_detected"
 MSG_SENSOR_DETECTED_OBJECTS = "sensor_detected_objects"
 MSG_PATH = "path"
