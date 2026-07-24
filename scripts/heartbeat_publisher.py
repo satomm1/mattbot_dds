@@ -1,5 +1,5 @@
 import rospy
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Bool, Float64MultiArray
 import tf
 import sys
 import time
@@ -50,7 +50,14 @@ class HeartbeatPublisher(TransformMixin):
 
         self.trans_listener = tf.TransformListener()
 
+        # Default false until /mcu_connected is published (MCU not up yet)
+        self.mcu_connected = False
+        rospy.Subscriber("/mcu_connected", Bool, self.mcu_connected_callback, queue_size=1)
+
         rospy.Subscriber(ROS_TOPIC_TRANSFORMATION_MATRIX_ABS, Float64MultiArray, self.transformation_callback)
+
+    def mcu_connected_callback(self, msg):
+        self.mcu_connected = bool(msg.data)
 
     def run(self):
         while not rospy.is_shutdown():
@@ -78,7 +85,16 @@ class HeartbeatPublisher(TransformMixin):
 
             # Create a heartbeat message
             heartbeat = Heartbeat(
-                self.my_id_int, int(time.time()), DEFAULT_AGENT_TYPE, self.my_ip, location_valid, x, y, theta, []
+                self.my_id_int,
+                int(time.time()),
+                DEFAULT_AGENT_TYPE,
+                self.my_ip,
+                location_valid,
+                x,
+                y,
+                theta,
+                [],
+                self.mcu_connected,
             )
 
             # Publish the heartbeat message

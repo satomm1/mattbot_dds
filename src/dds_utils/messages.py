@@ -20,6 +20,7 @@ class Heartbeat(IdlStruct):
         y (float): The y-coordinate of the agent's location.
         theta (float): The orientation of the agent.
         topics (sequence[str]): A sequence of topics the agent is publishing to
+        mcu_connected (bool): True when MCU SPI handshake succeeded and comms loop is running.
     """
 
     agent_id: int
@@ -31,6 +32,7 @@ class Heartbeat(IdlStruct):
     y: float
     theta: float
     topics: sequence[str]
+    mcu_connected: bool
 
 
 @dataclass
