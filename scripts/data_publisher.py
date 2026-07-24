@@ -95,6 +95,10 @@ class DataPublisher(TransformMixin):
         self.object_subscriber = rospy.Subscriber("/confirmed_objects", DetectedObject, self.confirmed_object_callback, queue_size=10)
         self.path_subscriber = rospy.Subscriber("/cmd_smoothed_path", Path, self.path_callback, queue_size=10)
         self.voice_goal_subscriber = rospy.Subscriber("/voice_goal", Pose2D, self.voice_goal_callback, queue_size=10)
+        # Patrol publishes here (not /external_goal) so DDS does not echo inbound goals back out.
+        self.patrol_goal_subscriber = rospy.Subscriber(
+            "/patrol_goal_for_dds", Pose2D, self.patrol_goal_callback, queue_size=10
+        )
         self.new_face_encoding_subscriber = rospy.Subscriber("/new_face_encoding", FaceEncoding, self.face_encoding_callback, queue_size=10)
         self.llm_image_subscriber = rospy.Subscriber("/labeled_unknown_objects", LabeledObjectArray, self.labeled_callback, queue_size=3)
         self.invalid_goal_subscriber = rospy.Subscriber("/invalid_goal", Pose2D, self.invalid_goal_callback, queue_size=10)
@@ -654,6 +658,25 @@ class DataPublisher(TransformMixin):
         msg.theta = new_point[2]
 
         self._publish_data(MSG_GOAL, message_converter.convert_ros_message_to_dictionary(msg))
+
+    def patrol_goal_callback(self, msg):
+        """Forward local patrol goals to DDS as MSG_GOAL for central GUI / fleet consumers."""
+        x = msg.x
+        y = msg.y
+        th = msg.theta
+        new_point = self.transform_point([x, y, th])
+        out = Pose2D()
+        out.x = new_point[0]
+        out.y = new_point[1]
+        out.theta = new_point[2]
+        self._publish_data(MSG_GOAL, message_converter.convert_ros_message_to_dictionary(out))
+        _log.debug(
+            "patrol goal -> DDS %s x=%.3f y=%.3f theta=%.3f",
+            MSG_GOAL,
+            out.x,
+            out.y,
+            out.theta,
+        )
 
     def face_encoding_callback(self, msg):
         # Convert the Float64MultiArray to a list
