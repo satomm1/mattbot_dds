@@ -68,6 +68,8 @@ add_message_files(
   LedgerObservation.msg
   LedgerAgentEntry.msg
   Ledger.msg
+  ObjectBelief.msg
+  ObjectBeliefArray.msg
 )
 
 ## Generate services in the 'srv' folder
@@ -190,6 +192,7 @@ catkin_install_python(PROGRAMS
   scripts/image_publisher.py
   scripts/publish_multi_agent_execute_at.py
   scripts/observation_ledger.py
+  scripts/object_belief_map.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

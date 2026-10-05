@@ -22,6 +22,11 @@
     <arg name="enable_ledger" default="true"/>
     <!-- Same-class observations within this distance (m, reference frame) are the same object. -->
     <arg name="ledger_match_radius_m" default="0.75"/>
+    <!-- Blockage beliefs from the ledger (/object_beliefs per object, /object_belief_map per cell): full belief for hold_s after the
+         latest observation, then linear decay to unknown over decay_s. Not used by navigation yet. -->
+    <arg name="enable_object_belief" default="$(arg enable_ledger)"/>
+    <arg name="belief_hold_s" default="60.0"/>
+    <arg name="belief_decay_s" default="120.0"/>
 
     <node name="agent_entry_exit" pkg="mattbot_dds" type="entry_exit.py" output="screen"/>
     <node name="heartbeat_publisher" pkg="mattbot_dds" type="heartbeat_publisher.py" output="screen"/>
@@ -52,6 +57,11 @@
 
     <node if="$(arg enable_ledger)" name="observation_ledger" pkg="mattbot_dds" type="observation_ledger.py" output="screen">
         <param name="match_radius_m" value="$(arg ledger_match_radius_m)"/>
+    </node>
+
+    <node if="$(arg enable_object_belief)" name="object_belief_map" pkg="mattbot_dds" type="object_belief_map.py" output="screen">
+        <param name="hold_s" value="$(arg belief_hold_s)"/>
+        <param name="decay_s" value="$(arg belief_decay_s)"/>
     </node>
 
     <node if="$(arg publish_images)" name="image_publisher" pkg="mattbot_dds" type="image_publisher.py" output="screen">
