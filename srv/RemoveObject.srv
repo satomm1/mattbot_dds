@@ -1,0 +1,5 @@
+# Remove an active object from the ledger (as if this robot observed it to be gone).
+string object_id
+---
+bool success
+string message

@@ -148,6 +148,17 @@ MSG_POSITION_INIT = "position_init"
 MSG_SEND_UNKNOWN_IMAGES = "send_unknown_images"
 MSG_AIR_QUALITY = "air_quality"
 
+# Observation ledger (see dds_utils/ledger.py).
+# Broadcast on own DataTopic. JSON: Observation.to_dict()
+MSG_LEDGER_OBSERVATION = "ledger_observation"
+# Broadcast on own DataTopic. JSON: {"requester": int, "responders": [int], "agents": [int] | null}
+MSG_LEDGER_SYNC_REQUEST = "ledger_sync_request"
+# Broadcast on own DataTopic. JSON: Removal.to_dict()
+MSG_LEDGER_REMOVAL = "ledger_removal"
+# Directed to DataTopic{requester}. JSON: {"responder": int, "observations": [Observation dict, ...],
+#   "removals": [Removal dict, ...], "seq_high": {"<session>": int} (only if responder's own data was requested)}
+MSG_LEDGER_SYNC_RESPONSE = "ledger_sync_response"
+
 
 def make_data_message(message_type: str, sending_agent: int, payload: dict) -> DataMessage:
     return DataMessage(

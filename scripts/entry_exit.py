@@ -432,7 +432,8 @@ class EntryExitCommunication(TransformMixin):
         self.init_writer = DataWriter(self.publisher, self.init_topic, qos=entry_init_reliable_qos)
 
         # ROS Publisher for publishing transformation matrix
-        self.transform_pub = rospy.Publisher(ROS_TOPIC_TRANSFORMATION_MATRIX, Float64MultiArray, queue_size=10)
+        # Latched so nodes started later (e.g. observation_ledger) still receive R/t.
+        self.transform_pub = rospy.Publisher(ROS_TOPIC_TRANSFORMATION_MATRIX, Float64MultiArray, queue_size=10, latch=True)
 
         # FIXME
         self.agent_sub_pub = rospy.Publisher(ROS_TOPIC_AGENTS_TO_SUBSCRIBE, Int16MultiArray, queue_size=10)

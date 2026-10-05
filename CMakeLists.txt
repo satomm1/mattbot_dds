@@ -65,14 +65,17 @@ add_message_files(
   MultiAgentTimingSolve.msg
   MultiAgentActiveTrajectory.msg
   MultiAgentCollisionReport.msg
+  LedgerObservation.msg
+  LedgerAgentEntry.msg
+  Ledger.msg
 )
 
 ## Generate services in the 'srv' folder
-# add_service_files(
-#   FILES
-#   Service1.srv
-#   Service2.srv
-# )
+add_service_files(
+  FILES
+  GetLedger.srv
+  RemoveObject.srv
+)
 
 ## Generate actions in the 'action' folder
 # add_action_files(
@@ -186,6 +189,7 @@ catkin_install_python(PROGRAMS
   scripts/own_data_subscriber.py
   scripts/image_publisher.py
   scripts/publish_multi_agent_execute_at.py
+  scripts/observation_ledger.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

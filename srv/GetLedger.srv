@@ -1,0 +1,6 @@
+# Filters (all optional): empty agent_ids = all agents, empty class_name = all classes.
+int32[] agent_ids
+string class_name
+float64 since          # only observations with stamp >= since
+---
+Ledger ledger

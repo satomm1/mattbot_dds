@@ -18,6 +18,10 @@
     <arg name="image_max_width" default="640"/>
     <!-- Upside-down camera on tall robots: 180° rotate before JPEG (same as capture/OSOD). -->
     <arg name="tall" default="false"/>
+    <!-- Observation ledger: records confirmed objects from this robot and peers (see /ledger). -->
+    <arg name="enable_ledger" default="true"/>
+    <!-- Same-class observations within this distance (m, reference frame) are the same object. -->
+    <arg name="ledger_match_radius_m" default="0.75"/>
 
     <node name="agent_entry_exit" pkg="mattbot_dds" type="entry_exit.py" output="screen"/>
     <node name="heartbeat_publisher" pkg="mattbot_dds" type="heartbeat_publisher.py" output="screen"/>
@@ -44,6 +48,10 @@
     <node name="own_data_subscriber" pkg="mattbot_dds" type="own_data_subscriber.py" output="screen" required="true">
         <param name="sqlite" value="$(arg sqlite)"/>
         <param name="multi_agent_execute_at_ros_topic" value="$(arg multi_agent_execute_at_ros_topic)"/>
+    </node>
+
+    <node if="$(arg enable_ledger)" name="observation_ledger" pkg="mattbot_dds" type="observation_ledger.py" output="screen">
+        <param name="match_radius_m" value="$(arg ledger_match_radius_m)"/>
     </node>
 
     <node if="$(arg publish_images)" name="image_publisher" pkg="mattbot_dds" type="image_publisher.py" output="screen">

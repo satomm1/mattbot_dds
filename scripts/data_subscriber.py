@@ -4,7 +4,7 @@ from mattbot_image_detection.msg import DetectedObject, DetectedObjectArray
 from geometry_msgs.msg import Pose
 from mattbot_dds.msg import AgentPath, MapUpdate, MultiAgentPlannedPath, MultiAgentCollisionReport
 from nav_msgs.msg import Path
-from std_msgs.msg import Float32MultiArray, Float64MultiArray, Int16MultiArray, Time as RosTimeMsg
+from std_msgs.msg import Float32MultiArray, Float64MultiArray, Int16MultiArray, String, Time as RosTimeMsg
 from mattbot_image_detection.msg import FaceEncoding
 
 import sys
@@ -23,6 +23,9 @@ from dds_utils import (
     MSG_DETECTED_OBJECT,
     MSG_FACE_ENCODING,
     MSG_GLOBAL_OBSERVE_START,
+    MSG_LEDGER_OBSERVATION,
+    MSG_LEDGER_REMOVAL,
+    MSG_LEDGER_SYNC_REQUEST,
     MSG_MAP_UPDATE,
     MSG_PATH,
     MSG_MULTI_AGENT_PLANNED_PATH,
@@ -90,6 +93,10 @@ class DataListener(Listener, TransformMixin):
             Float32MultiArray,
             queue_size=2,
         )
+        # Ledger messages from this peer, relayed to observation_ledger.py
+        self._pub_ledger_obs = rospy.Publisher("/ledger/observation_from_agent", String, queue_size=50)
+        self._pub_ledger_rem = rospy.Publisher("/ledger/removal_from_agent", String, queue_size=50)
+        self._pub_ledger_sync_req = rospy.Publisher("/ledger/sync_request_from_agent", String, queue_size=10)
 
     def on_data_available(self, reader):
         for sample in reader.read():
@@ -264,6 +271,18 @@ class DataListener(Listener, TransformMixin):
                         self.topic_id,
                         tmsg.data,
                     )
+
+                elif message_type == MSG_LEDGER_OBSERVATION:
+                    # Peer's live ledger observation; positions stay in the reference frame.
+                    self._pub_ledger_obs.publish(String(data=sample.data))
+
+                elif message_type == MSG_LEDGER_REMOVAL:
+                    # Peer observed an object to be gone.
+                    self._pub_ledger_rem.publish(String(data=sample.data))
+
+                elif message_type == MSG_LEDGER_SYNC_REQUEST:
+                    # Peer asking for ledger history; observation_ledger decides whether to reply.
+                    self._pub_ledger_sync_req.publish(String(data=sample.data))
 
                 elif message_type == MSG_FACE_ENCODING:
                     data = json.loads(sample.data)

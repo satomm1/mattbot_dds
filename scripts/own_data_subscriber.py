@@ -3,7 +3,7 @@ import tf
 import sys
 from rospy_message_converter import message_converter
 from geometry_msgs.msg import Pose2D, PoseWithCovarianceStamped
-from std_msgs.msg import Bool, Float64MultiArray, UInt32
+from std_msgs.msg import Bool, Float64MultiArray, String, UInt32
 
 from cyclonedds.topic import Topic
 from cyclonedds.sub import Subscriber, DataReader
@@ -18,6 +18,7 @@ import numpy as np
 
 from dds_utils import (
     MSG_GOAL,
+    MSG_LEDGER_SYNC_RESPONSE,
     MSG_MULTI_ROBOT_GOAL,
     MSG_MULTI_AGENT_EXECUTE_AT,
     MSG_MULTI_AGENT_TIMING_SOLVE,
@@ -97,6 +98,8 @@ class SelfDataListener(Listener, TransformMixin):
         )
         self.send_unknown_images_pub = rospy.Publisher("/send_unknown_images", UInt32, queue_size=10)
         self.init_pub = rospy.Publisher("/initialpose", PoseWithCovarianceStamped, queue_size=10)
+        # Ledger sync responses addressed to this robot, relayed to observation_ledger.py
+        self.ledger_sync_resp_pub = rospy.Publisher("/ledger/sync_response", String, queue_size=10)
 
         self._stop_topic = rospy.get_param("~stop_ros_topic", "/stop").strip() or "/stop"
         self._stop_pub = rospy.Publisher(self._stop_topic, Bool, queue_size=1, latch=False)
@@ -319,6 +322,10 @@ class SelfDataListener(Listener, TransformMixin):
                     self._stop_topic,
                 )
                 self._stop_pub.publish(Bool(data=True))
+
+            elif message_type == MSG_LEDGER_SYNC_RESPONSE:
+                # Peer's reply to our ledger sync request
+                self.ledger_sync_resp_pub.publish(String(data=sample.data))
 
             elif message_type == MSG_ROBOT_SHUTDOWN:
                 if not self._allow_dds_roslaunch_shutdown:

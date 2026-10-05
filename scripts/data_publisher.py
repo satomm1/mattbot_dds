@@ -13,7 +13,7 @@ from mattbot_dds.msg import (
 )
 from nav_msgs.msg import Path
 from geometry_msgs.msg import Pose2D
-from std_msgs.msg import Float32MultiArray, Float64MultiArray, Time as RosTimeMsg
+from std_msgs.msg import Float32MultiArray, Float64MultiArray, String, Time as RosTimeMsg
 from mattbot_image_detection.msg import FaceEncoding
 from mattbot_bringup.msg import AirQuality
 
@@ -37,6 +37,10 @@ from dds_utils import (
     MSG_GLOBAL_OBSERVE_START,
     MSG_GOAL,
     MSG_INVALID_GOAL,
+    MSG_LEDGER_OBSERVATION,
+    MSG_LEDGER_REMOVAL,
+    MSG_LEDGER_SYNC_REQUEST,
+    MSG_LEDGER_SYNC_RESPONSE,
     MSG_LLM_DETECTED_OBJECT,
     MSG_MULTI_ROBOT_GOAL,
     MSG_MULTI_AGENT_PLANNED_PATH,
@@ -103,6 +107,12 @@ class DataPublisher(TransformMixin):
         self.llm_image_subscriber = rospy.Subscriber("/labeled_unknown_objects", LabeledObjectArray, self.labeled_callback, queue_size=3)
         self.invalid_goal_subscriber = rospy.Subscriber("/invalid_goal", Pose2D, self.invalid_goal_callback, queue_size=10)
         self.detected_object_subscriber = rospy.Subscriber("/detected_objects", DetectedObjectArray, self.detected_object_callback, queue_size=10)
+
+        # Observation ledger (observation_ledger.py): payloads are JSON already in the reference frame.
+        rospy.Subscriber("/ledger/observation_for_dds", String, self.ledger_observation_callback, queue_size=10)
+        rospy.Subscriber("/ledger/removal_for_dds", String, self.ledger_removal_callback, queue_size=10)
+        rospy.Subscriber("/ledger/sync_request_for_dds", String, self.ledger_sync_request_callback, queue_size=10)
+        rospy.Subscriber("/ledger/sync_response_for_dds", String, self.ledger_sync_response_callback, queue_size=10)
 
         # Rate limit outbound person detections. 0 or negative disables the limit.
         person_rate_hz = float(rospy.get_param("~person_detected_publish_rate_hz", 3.0))
@@ -565,6 +575,27 @@ class DataPublisher(TransformMixin):
             self.db.add_object(
                 msg.class_name, msg.pose.position.x, msg.pose.position.y, self.my_id, stamp
             )
+
+    def ledger_observation_callback(self, msg):
+        """Broadcast one ego ledger observation on my DataTopic."""
+        self._publish_data(MSG_LEDGER_OBSERVATION, json.loads(msg.data))
+
+    def ledger_removal_callback(self, msg):
+        """Broadcast one ego ledger removal on my DataTopic."""
+        self._publish_data(MSG_LEDGER_REMOVAL, json.loads(msg.data))
+
+    def ledger_sync_request_callback(self, msg):
+        """Broadcast a ledger sync request on my DataTopic."""
+        self._publish_data(MSG_LEDGER_SYNC_REQUEST, json.loads(msg.data))
+
+    def ledger_sync_response_callback(self, msg):
+        """Send a ledger sync response directly to the requester's DataTopic."""
+        payload = json.loads(msg.data)
+        target = int(payload.pop("target"))
+        self._get_writer_for_target(target).write(
+            make_data_message(MSG_LEDGER_SYNC_RESPONSE, self.my_id_int, payload)
+        )
+        time.sleep(INTER_DDS_WRITE_SLEEP_S)
 
     def labeled_callback(self, msg):
         for obj in msg.objects:
