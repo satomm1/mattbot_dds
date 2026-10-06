@@ -1,0 +1,7 @@
+# Choose observation stops for a planned path (mattbot_navigation observation_planner).
+nav_msgs/Path path                # planned path, local map frame
+geometry_msgs/Pose2D start
+geometry_msgs/Pose2D goal
+string[] exclude_object_ids       # already checked for this goal
+---
+ObservationStop[] stops           # ordered along the path

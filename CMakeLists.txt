@@ -70,6 +70,9 @@ add_message_files(
   Ledger.msg
   ObjectBelief.msg
   ObjectBeliefArray.msg
+  ObservationStop.msg
+  ObservationEvent.msg
+  ObservationResult.msg
 )
 
 ## Generate services in the 'srv' folder
@@ -77,6 +80,7 @@ add_service_files(
   FILES
   GetLedger.srv
   RemoveObject.srv
+  SelectObservations.srv
 )
 
 ## Generate actions in the 'action' folder
