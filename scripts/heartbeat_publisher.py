@@ -118,4 +118,7 @@ if __name__ == "__main__":
     _log.debug("Waiting %.1fs before publishing heartbeats (entry_exit join window)", startup_delay)
     time.sleep(startup_delay)
     rospy.on_shutdown(heartbeat_publisher.shutdown)
-    heartbeat_publisher.run()
+    try:
+        heartbeat_publisher.run()
+    except rospy.ROSInterruptException:
+        pass  # shutdown while sleeping (with simulated time the clock may stop first)

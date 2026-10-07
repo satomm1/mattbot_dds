@@ -433,4 +433,7 @@ if __name__ == "__main__":
     data_subscriber = DataSubscriber()
     time.sleep(11)  # Wait
     rospy.on_shutdown(data_subscriber.shutdown)
-    data_subscriber.run()
+    try:
+        data_subscriber.run()
+    except rospy.ROSInterruptException:
+        pass  # shutdown while sleeping (with simulated time the clock may stop first)

@@ -757,4 +757,7 @@ if __name__ == "__main__":
 
     entry_exit_obj = EntryExitCommunication()
     rospy.on_shutdown(entry_exit_obj.shutdown)
-    entry_exit_obj.setup_and_run()
+    try:
+        entry_exit_obj.setup_and_run()
+    except rospy.ROSInterruptException:
+        pass  # shutdown while sleeping (with simulated time the clock may stop first)

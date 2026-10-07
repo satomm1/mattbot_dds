@@ -173,4 +173,7 @@ class LocationSubscriber(TransformMixin):
 if __name__ == "__main__":
     location_subscriber = LocationSubscriber()
     rospy.on_shutdown(location_subscriber.shutdown)
-    location_subscriber.run()
+    try:
+        location_subscriber.run()
+    except rospy.ROSInterruptException:
+        pass  # shutdown while sleeping (with simulated time the clock may stop first)

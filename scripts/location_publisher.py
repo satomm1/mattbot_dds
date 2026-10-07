@@ -203,4 +203,7 @@ class LocationPublisher(TransformMixin):
 if __name__ == "__main__":
     location_publisher = LocationPublisher()
     rospy.on_shutdown(location_publisher.shutdown)
-    location_publisher.run()
+    try:
+        location_publisher.run()
+    except rospy.ROSInterruptException:
+        pass  # shutdown while sleeping (with simulated time the clock may stop first)
