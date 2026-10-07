@@ -12,7 +12,6 @@ See dds_utils/belief.py for the model. Not consumed by navigation yet.
 """
 
 import threading
-import time
 
 import rospy
 from nav_msgs.msg import OccupancyGrid
@@ -52,8 +51,9 @@ class ObjectBeliefMapNode:
     def publish_timer(self, _event):
         with self.lock:
             info, header, objects = self.map_info, self.map_header, self.objects
-        # Ledger stamps are observers' wall time, so decay against wall time too.
-        now = time.time()
+        # Ledger stamps are observers' ROS time (wall time on the robots, the sim clock in simulation),
+        # so decay against ROS time too.
+        now = rospy.get_time()
         states = sorted((object_state(o, now, self.t1, self.t2) for o in objects), key=lambda s: s.belief)
         stamp = rospy.Time.now()
 

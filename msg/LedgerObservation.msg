@@ -4,7 +4,7 @@ string object_id       # canonical id of the physical object (merged across agen
 int32 observer_id      # ROBOT_ID of the observing agent
 uint32 session
 uint32 seq
-float64 stamp          # Unix wall time (s)
+float64 stamp          # observer's ROS time (s; Unix time: the wall clock on robots)
 string class_name
 float32 probability
 float32 width          # metres

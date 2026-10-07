@@ -52,6 +52,10 @@ GAP_REQUEST_PERIOD_S = 5.0  # min time between gap-recovery requests for one age
 class ObservationLedgerNode(TransformMixin):
     def __init__(self):
         rospy.init_node("observation_ledger")
+        # Times are ROS time: the wall clock on the robots, the sim clock with /use_sim_time (0 until the
+        # first /clock, so wait for it before stamping the session)
+        while not rospy.is_shutdown() and rospy.get_time() <= 0.0:
+            time.sleep(0.05)  # wall clock: ROS time is not running yet
         self.init_transform_state()
 
         try:
@@ -61,9 +65,9 @@ class ObservationLedgerNode(TransformMixin):
             sys.exit(1)
 
         # Ego observation ids are "<my_id>-<session>-<seq>"; a new session on every start.
-        self.session = int(time.time())
+        self.session = int(rospy.get_time())
         self.seq = 0
-        self.start_time = time.time()
+        self.start_time = rospy.get_time()
 
         self.ledger = ObservationLedger()
         # Same class within this radius (reference frame, m) of a known object -> same object
@@ -116,7 +120,7 @@ class ObservationLedgerNode(TransformMixin):
                 observer_id=self.my_id,
                 session=self.session,
                 seq=self.seq,
-                stamp=time.time(),
+                stamp=rospy.get_time(),
                 class_name=msg.class_name,
                 probability=float(msg.probability),
                 width=float(msg.width),
@@ -134,7 +138,7 @@ class ObservationLedgerNode(TransformMixin):
     def ego_removal_callback(self, msg):
         """This robot observed that an object is gone: remove the nearest matching active object."""
         x, y, _ = self.transform_point([msg.pose.position.x, msg.pose.position.y, 0.0])
-        probe = Observation("", "", self.my_id, self.session, 0, time.time(), msg.class_name,
+        probe = Observation("", "", self.my_id, self.session, 0, rospy.get_time(), msg.class_name,
                             float(msg.probability), float(msg.width), float(x), float(y))
         with self.lock:
             object_id = self.resolver.resolve(probe, self.ledger)
@@ -164,7 +168,7 @@ class ObservationLedgerNode(TransformMixin):
             observer_id=self.my_id,
             session=self.session,
             seq=self.seq,
-            stamp=time.time(),
+            stamp=rospy.get_time(),
             class_name=members[0].class_name,
             x=sum(o.x for o in members) / len(members),
             y=sum(o.y for o in members) / len(members),
@@ -201,7 +205,7 @@ class ObservationLedgerNode(TransformMixin):
         """Missing seqs from agent, if a gap request is due (call with self.lock held)."""
         # DataTopic is KeepLast(1), so a burst can drop samples; ask the observer to resend.
         gap = self.ledger.missing_seq(agent_id, session)
-        now = time.time()
+        now = rospy.get_time()
         if not gap or now - self.last_gap_request.get(agent_id, 0.0) <= GAP_REQUEST_PERIOD_S:
             return []
         self.last_gap_request[agent_id] = now
@@ -239,7 +243,7 @@ class ObservationLedgerNode(TransformMixin):
 
     def sync_timer(self, _event):
         """Ask every peer that has not answered yet for its full ledger."""
-        if time.time() - self.start_time < INIT_DISCOVERY_GRACE_S:
+        if rospy.get_time() - self.start_time < INIT_DISCOVERY_GRACE_S:
             return  # give DDS readers time to discover us
         with self.lock:
             pending = [p for p in self.peers - self.synced if self.sync_attempts.get(p, 0) < SYNC_MAX_ATTEMPTS]

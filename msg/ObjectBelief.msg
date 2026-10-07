@@ -10,7 +10,7 @@ float64 y
 float64 local_x        # mean observed position, this robot's map frame
 float64 local_y
 float32 width          # max observed width (m)
-float64 first_stamp    # earliest observation (Unix wall time, s)
+float64 first_stamp    # earliest observation (ROS time, s; Unix time)
 float64 last_stamp     # latest observation, any agent
 int32 num_observations
 int32[] observer_ids   # agents that have observed it

@@ -14,5 +14,5 @@ float64 x                # robot pose while observing, local map frame
 float64 y
 float64 theta
 float32 distance         # robot to object (m)
-float64 window_start     # Unix wall time (s), same clock as ledger stamps
+float64 window_start     # ROS time (s; Unix time: the wall clock on robots, the sim clock in simulation), same clock as ledger stamps
 float64 window_end       # 0 until ENDED / ABORTED

@@ -8,7 +8,7 @@ string object_id
 string class_name
 uint8 outcome
 string reason
-float64 window_start     # Unix wall time (s)
+float64 window_start     # ROS time (s; Unix time: the wall clock on robots, the sim clock in simulation)
 float64 window_end
 int32 frames             # detector frames in the window
 int32 present_frames

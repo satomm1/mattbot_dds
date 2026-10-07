@@ -32,7 +32,7 @@ class TrackedObject:
     local_x: float  # mean position, this robot's map frame
     local_y: float
     width: float  # max observed width (m)
-    first_stamp: float  # earliest observation (Unix wall time, s)
+    first_stamp: float  # earliest observation (ROS time, s; Unix time)
     last_stamp: float  # latest observation
     num_observations: int
     observer_ids: List[int] = field(default_factory=list)  # sorted, unique

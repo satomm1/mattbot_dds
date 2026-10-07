@@ -31,7 +31,7 @@ class Observation:
     observer_id: int  # ROBOT_ID of the agent that made the observation
     session: int  # observer's ledger start time (s); keeps obs_id unique across restarts
     seq: int  # 1, 2, 3, ... per (observer, session); used to detect dropped DDS samples
-    stamp: float  # Unix wall time (s)
+    stamp: float  # observer's ROS time (s; Unix time: the wall clock on robots, the sim clock in simulation)
     class_name: str
     probability: float
     width: float  # metres
@@ -55,7 +55,7 @@ class Removal:
     observer_id: int
     session: int
     seq: int
-    stamp: float  # Unix wall time (s)
+    stamp: float  # observer's ROS time (s; Unix time: the wall clock on robots, the sim clock in simulation)
     class_name: str
     x: float  # last known position of the object (reference frame)
     y: float
