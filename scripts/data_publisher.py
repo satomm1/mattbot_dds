@@ -61,6 +61,7 @@ from dds_utils import (
     data_topic_name,
     dispose_participant,
     make_data_message,
+    reliable_lifespan_qos,
     reliable_qos,
     require_robot_id_int,
 )
@@ -160,6 +161,8 @@ class DataPublisher(TransformMixin):
             )
 
         self._target_data_writers = {}
+        self._sync_response_writers = {}
+        self._target_topics = {}
         self._external_goal_multi_topic = rospy.get_param(
             "~external_goal_multi_ros_topic", "/external_goal_multi"
         ).strip() or "/external_goal_multi"
@@ -350,13 +353,30 @@ class DataPublisher(TransformMixin):
             },
         )
 
+    def _get_topic_for_target(self, agent_id):
+        """DataTopic{agent_id}, cached per target and shared by the per-target writers."""
+        if agent_id not in self._target_topics:
+            self._target_topics[agent_id] = Topic(self.participant, data_topic_name(agent_id), DataMessage)
+        return self._target_topics[agent_id]
+
     def _get_writer_for_target(self, agent_id):
         """Reliable DataWriter on DataTopic{agent_id}, cached per target."""
         if agent_id in self._target_data_writers:
             return self._target_data_writers[agent_id]
-        topic = Topic(self.participant, data_topic_name(agent_id), DataMessage)
-        writer = DataWriter(self.publisher, topic, qos=reliable_qos)
+        writer = DataWriter(self.publisher, self._get_topic_for_target(agent_id), qos=reliable_qos)
         self._target_data_writers[agent_id] = writer
+        return writer
+
+    def _get_sync_response_writer(self, agent_id):
+        """DataWriter on DataTopic{agent_id} for ledger sync responses, cached per target.
+
+        Separate from _get_writer_for_target so the Lifespan keeps a requester that restarts from
+        being handed our last (stale) response as soon as its reader matches.
+        """
+        if agent_id in self._sync_response_writers:
+            return self._sync_response_writers[agent_id]
+        writer = DataWriter(self.publisher, self._get_topic_for_target(agent_id), qos=reliable_lifespan_qos)
+        self._sync_response_writers[agent_id] = writer
         return writer
 
     def multi_robot_goal_plan_callback(self, msg):
@@ -592,7 +612,7 @@ class DataPublisher(TransformMixin):
         """Send a ledger sync response directly to the requester's DataTopic."""
         payload = json.loads(msg.data)
         target = int(payload.pop("target"))
-        self._get_writer_for_target(target).write(
+        self._get_sync_response_writer(target).write(
             make_data_message(MSG_LEDGER_SYNC_RESPONSE, self.my_id_int, payload)
         )
         time.sleep(INTER_DDS_WRITE_SLEEP_S)
@@ -759,6 +779,8 @@ class DataPublisher(TransformMixin):
     def shutdown(self):
         _log.debug("Shutting down")
         self._target_data_writers.clear()
+        self._sync_response_writers.clear()
+        self._target_topics.clear()
         self.data_writer = None
         self.publisher = None
         dispose_participant(self.participant)

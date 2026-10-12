@@ -80,7 +80,7 @@ from .network import (
     require_robot_id_int,
 )
 from .participant import create_domain_participant
-from .qos import best_effort_qos, entry_init_reliable_qos, image_qos, reliable_qos
+from .qos import best_effort_qos, entry_init_reliable_qos, image_qos, reliable_lifespan_qos, reliable_qos
 from .topics import (
     ENTRY_EXIT_TOPIC,
     HEARTBEAT_TOPIC,
@@ -176,6 +176,7 @@ __all__ = [
     "best_effort_qos",
     "entry_init_reliable_qos",
     "image_qos",
+    "reliable_lifespan_qos",
     "reliable_qos",
     "ENTRY_EXIT_TOPIC",
     "HEARTBEAT_TOPIC",

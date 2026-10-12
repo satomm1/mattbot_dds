@@ -324,8 +324,10 @@ class SelfDataListener(Listener, TransformMixin):
                 self._stop_pub.publish(Bool(data=True))
 
             elif message_type == MSG_LEDGER_SYNC_RESPONSE:
-                # Peer's reply to our ledger sync request
-                self.ledger_sync_resp_pub.publish(String(data=sample.data))
+                # Peer's reply to our ledger sync request. sent_at (sender wall clock, s) lets the
+                # ledger drop a stale reply replayed from before it started (TransientLocal history).
+                data["sent_at"] = int(timestamp)
+                self.ledger_sync_resp_pub.publish(String(data=json.dumps(data)))
 
             elif message_type == MSG_ROBOT_SHUTDOWN:
                 if not self._allow_dds_roslaunch_shutdown:

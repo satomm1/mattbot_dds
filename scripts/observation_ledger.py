@@ -47,6 +47,7 @@ _log = DdsLogger("ledger")
 SYNC_PERIOD_S = 3.0  # how often to retry sync requests to peers that have not answered
 SYNC_MAX_ATTEMPTS = 5  # per peer
 GAP_REQUEST_PERIOD_S = 5.0  # min time between gap-recovery requests for one agent
+STALE_RESPONSE_SLACK_S = 1  # sync responses sent more than this before start are stale replays
 
 
 class ObservationLedgerNode(TransformMixin):
@@ -68,6 +69,8 @@ class ObservationLedgerNode(TransformMixin):
         self.session = int(rospy.get_time())
         self.seq = 0
         self.start_time = rospy.get_time()
+        # Wall clock, like the DDS envelope timestamp (sent_at) on sync responses; ROS time may be sim time.
+        self.start_wall = time.time()
 
         self.ledger = ObservationLedger()
         # Same class within this radius (reference frame, m) of a known object -> same object
@@ -280,6 +283,13 @@ class ObservationLedgerNode(TransformMixin):
     def sync_response_callback(self, msg):
         """Merge a peer's sync response into the ledger (duplicates are ignored)."""
         resp = json.loads(msg.data)
+        sent_at = resp.get("sent_at")
+        if sent_at is not None and sent_at < int(self.start_wall) - STALE_RESPONSE_SLACK_S:
+            # Replayed from a DDS writer's history (sent to a previous run of this node); answering
+            # it as a sync would stop us from requesting fresh data from that peer.
+            _log.info("ignoring stale sync response from agent %s (sent %ds before start)",
+                      resp.get("responder"), int(self.start_wall) - sent_at)
+            return
         with self.lock:
             # Removals first, so stale observations of removed objects are dropped on arrival.
             for d in resp.get("removals", []):
