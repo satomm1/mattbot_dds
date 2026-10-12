@@ -14,7 +14,6 @@ from cyclonedds.core import Listener
 import time
 import os
 import json
-import numpy as np
 
 from dds_utils import (
     DEFAULT_AGENT_TYPE,
@@ -38,12 +37,16 @@ from dds_utils import (
     ROS_TOPIC_MAP_MOD,
     ROS_TOPIC_TRANSFORMATION_MATRIX,
     RobotIdError,
+    TPS_SMOOTH,
+    TRANSFORM_MODE,
     TransformMixin,
+    build_map_transform,
     create_domain_participant,
     dispose_participant,
     entry_init_reliable_qos,
     get_local_ip,
     hash_robot_id,
+    load_known_points,
     pack_transform_msg,
     require_robot_id_int,
 )
@@ -71,15 +74,6 @@ def _occupancy_grid_from_map_dict(map_data):
     grid.info.origin.orientation.w = map_data.get("origin_orientation_w")
     grid.data = map_data.get("occupancy")
     return grid
-
-
-def _read_known_points(path):
-    known_points = []
-    with open(path, "r") as f:
-        for line in f:
-            x, y = line.split(",")
-            known_points.append((float(x), float(y)))
-    return known_points
 
 
 class EntryExitListener(Listener):
@@ -497,7 +491,7 @@ class EntryExitCommunication(TransformMixin):
         # Now get reference points
         rospack = rospkg.RosPack()
         package_path = rospack.get_path("mattbot_dds")
-        self.known_points = _read_known_points(os.path.join(package_path, "scripts", "known_points.txt"))
+        self.known_points = load_known_points(os.path.join(package_path, "scripts", "known_points.txt"))
 
         self.entry_exit_listener.update_known_points(self.known_points)
 
@@ -619,36 +613,25 @@ class EntryExitCommunication(TransformMixin):
         """
         Determines the transform from my map to the reference map
         """
-        self.R = None
-        self.t = None
-        if self.known_points == self.reference_known_points:
-            self.R = np.identity(2)
-            self.t = np.zeros((2, 1))
+        try:
+            map_tf = build_map_transform(self.known_points, self.reference_known_points, TRANSFORM_MODE, TPS_SMOOTH)
+        except ValueError as exc:
+            rospy.logerr(
+                "Cannot build map transform from %d local / %d reference known points: %s",
+                len(self.known_points),
+                len(self.reference_known_points),
+                exc,
+            )
+            raise
+        self.update_transformation(map_tf)
+
+        if map_tf.fallback_reason:
+            _log_warn("map transform model=%s (fallback: %s)", map_tf.model, map_tf.fallback_reason)
         else:
-            # Find the transform from the known points
-            known_points = np.array(self.known_points)
-            reference_known_points = np.array(self.reference_known_points)
+            _log_info("map transform model=%s", map_tf.model)
 
-            centroid1 = np.mean(known_points, axis=0)
-            centroid2 = np.mean(reference_known_points, axis=0)
-            centered_points1 = known_points - centroid1
-            centered_points2 = reference_known_points - centroid2
-
-            H = np.dot(centered_points1.T, centered_points2)
-            U, S, Vt = np.linalg.svd(H)
-            R = Vt.T @ U.T
-
-            if np.linalg.det(R) < 0:
-                Vt[1, :] *= -1
-                R = Vt.T @ U.T
-
-            t = centroid2 - R @ centroid1
-
-            self.R = R
-            self.t = t
-
-        # Now publish the transformation matrix
-        self.transform_pub.publish(pack_transform_msg(self.R, self.t))
+        # Now publish the transform for the other nodes
+        self.transform_pub.publish(pack_transform_msg(map_tf))
 
     def run(self):
         """

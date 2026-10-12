@@ -13,6 +13,8 @@ from .config import (
     LOCATION_PERIOD,
     PARTICIPANT_LEASE_DURATION_MS,
     POSITION_INIT_RECENT_THRESHOLD_S,
+    TPS_SMOOTH,
+    TRANSFORM_MODE,
 )
 from .messages import (
     DataMessage,
@@ -98,7 +100,15 @@ from .topics import (
     image_topic_name,
     location_topic_name,
 )
-from .transform import TransformMixin, pack_transform_msg, parse_transform_msg, transform_point, transform_points
+from .transform import (
+    TransformMixin,
+    build_map_transform,
+    load_known_points,
+    pack_transform_msg,
+    parse_transform_msg,
+    transform_point,
+    transform_points,
+)
 
 __all__ = [
     "AIR_QUALITY_PUBLISH_PERIOD_S",
@@ -114,6 +124,8 @@ __all__ = [
     "LOCATION_PERIOD",
     "PARTICIPANT_LEASE_DURATION_MS",
     "POSITION_INIT_RECENT_THRESHOLD_S",
+    "TPS_SMOOTH",
+    "TRANSFORM_MODE",
     "DataMessage",
     "DdsLogger",
     "EntryExit",
@@ -194,6 +206,8 @@ __all__ = [
     "image_topic_name",
     "location_topic_name",
     "TransformMixin",
+    "build_map_transform",
+    "load_known_points",
     "pack_transform_msg",
     "parse_transform_msg",
     "transform_point",

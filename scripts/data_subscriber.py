@@ -368,10 +368,10 @@ class DataSubscriber(TransformMixin):
         )
 
     def transformation_callback(self, data):
-        self.R, self.t = parse_transform_msg(data)
+        self.update_transformation(parse_transform_msg(data))
 
         for agent_id in self.data_listeners:
-            self.data_listeners[agent_id].update_transformation(self.R, self.t)
+            self.data_listeners[agent_id].update_transformation(self.map_tf)
 
     def agents_to_subscribe_callback(self, data):
         # Get the list of agents to subscribe to
@@ -400,7 +400,7 @@ class DataSubscriber(TransformMixin):
                         global_observe_publisher=self.global_observe_publisher,
                         sqlite_db=self.db,
                     )
-                    self.data_listeners[agent_id].update_transformation(self.R, self.t)
+                    self.data_listeners[agent_id].update_transformation(self.map_tf)
                     self.data_readers[agent_id] = DataReader(
                         self.subscriber, new_data_topic, listener=self.data_listeners[agent_id], qos=reliable_qos
                     )

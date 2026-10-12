@@ -1,5 +1,7 @@
 """Timing and system-wide defaults for DDS nodes."""
 
+import os
+
 PARTICIPANT_LEASE_DURATION_MS = 30000
 
 HEARTBEAT_PERIOD = 10  # seconds
@@ -21,3 +23,7 @@ HEARTBEAT_STARTUP_DELAY_S = 6.0
 POSITION_INIT_RECENT_THRESHOLD_S = 5.0
 
 DEFAULT_AGENT_TYPE = "robot"
+
+# Map transform (local -> reference). Must match the central node's settings.
+TRANSFORM_MODE = os.environ.get("TRANSFORM_MODE", "tps")  # "tps" | "rigid"
+TPS_SMOOTH = float(os.environ.get("TPS_SMOOTH", "0.0"))

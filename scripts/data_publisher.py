@@ -26,7 +26,6 @@ import sys
 import time
 import json
 import copy
-import numpy as np
 
 from dds_utils import (
     AIR_QUALITY_PUBLISH_PERIOD_S,
@@ -560,20 +559,6 @@ class DataPublisher(TransformMixin):
     def _star_gru_out_ego_callback(self, msg: Float32MultiArray):
         aid = self._sender_id_optional()
         self._publish_data(MSG_STAR_GRU_OUT_EGO, {"v": [float(x) for x in msg.data]}, sleep=True, sending_agent=aid)
-
-    def transform_points(self, points, forward=True):
-        if self.R is None:
-            return points
-
-        points_xy = np.array([points[0, :], points[1, :]])
-        if forward:
-            new_point_xy = self.R @ points_xy + self.t
-            new_point_theta = points[2, :] + np.arctan2(self.R[1, 0], self.R[0, 0])
-            return np.concatenate((new_point_xy, new_point_theta))
-        else:
-            new_point_xy = self.R.T @ (points_xy - self.t)
-            new_point_theta = points[2, :] - np.arctan2(self.R[1, 0], self.R[0, 0])
-            return np.concatenate((new_point_xy, [new_point_theta]))
 
     def confirmed_object_callback(self, msg):
 

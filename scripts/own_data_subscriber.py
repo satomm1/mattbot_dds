@@ -385,10 +385,10 @@ class OwnDataSubscriber(TransformMixin):
 
     def transformation_callback(self, data):
 
-        # Get the transformation matrix
-        self.R, self.t = parse_transform_msg(data)
+        # Get the map transform
+        self.update_transformation(parse_transform_msg(data))
 
-        self.data_listener.update_transformation(self.R, self.t)
+        self.data_listener.update_transformation(self.map_tf)
 
     def run(self):
         while not rospy.is_shutdown():

@@ -142,7 +142,7 @@ class LocationSubscriber(TransformMixin):
                     _log.info("Subscribed to agent %s location", agent_id)
                     new_location_topic = Topic(self.participant, location_topic_name(agent_id), Location)
                     self.location_listeners[agent_id] = LocationListener(self.my_id_int, agent_id)
-                    self.location_listeners[agent_id].update_transformation(self.R, self.t)
+                    self.location_listeners[agent_id].update_transformation(self.map_tf)
                     self.location_readers[agent_id] = DataReader(
                         self.subscriber, new_location_topic, listener=self.location_listeners[agent_id], qos=best_effort_qos
                     )
