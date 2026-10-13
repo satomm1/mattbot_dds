@@ -491,7 +491,11 @@ class EntryExitCommunication(TransformMixin):
         # Now get reference points
         rospack = rospkg.RosPack()
         package_path = rospack.get_path("mattbot_dds")
-        self.known_points = load_known_points(os.path.join(package_path, "scripts", "known_points.txt"))
+        known_points_file = rospy.get_param(
+            "~known_points_file", os.path.join(package_path, "scripts", "known_points_short.txt")
+        )
+        self.known_points = load_known_points(known_points_file)
+        _log_info("Loaded %d known points from %s", len(self.known_points), known_points_file)
 
         self.entry_exit_listener.update_known_points(self.known_points)
 

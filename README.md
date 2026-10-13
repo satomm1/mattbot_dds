@@ -50,7 +50,7 @@ This is separate from **`MSG_STOP`**, which only publishes **`/stop`** and does 
 Because agents may use different local maps (resolution, origin, sensor coverage), the stack assumes a **reference map**. All **shared** poses sent over DDS must be expressed in that reference frame; each agent transforms **outbound** data to the reference frame and **inbound** data back to its local map using a 2D linear map from correspondence points.
 
 > [!IMPORTANT]
-> Store correspondence points in [`scripts/known_points.txt`](scripts/known_points.txt), one `x,y` per line (local map). To capture reference-frame coordinates, use the `get_reference_points` launch file from `mattbot_bringup`, drive the robot to the same physical locations, and record them.
+> Store correspondence points in `scripts/known_points_<name>.txt` ([`short`](scripts/known_points_short.txt), [`tall`](scripts/known_points_tall.txt), [`kaist`](scripts/known_points_kaist.txt)), one `x,y` per line (local map). `dds.launch` picks the file with its `known_points` arg (default `short`); `short.launch`, `tall.launch` and `kaist.launch` pass their own name, and you can override it, e.g. `roslaunch mattbot_bringup tall.launch known_points:=short`. To record points, use `get_reference_points_short.launch` / `get_reference_points_tall.launch` from `mattbot_bringup` (each writes its matching file), drive the robot to the same physical locations, and record them in the same order on every robot.
 
 Agents must subscribe to the shared ROS transform (`transformation_matrix` / `/transformation_matrix` per `dds_utils.topics`) so bridge nodes can apply `TransformMixin.transform_point`.
 
