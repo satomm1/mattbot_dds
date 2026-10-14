@@ -1,0 +1,5 @@
+# Evaluate scout trips from a given pose (mattbot_navigation observation_planner).
+geometry_msgs/Pose2D start     # local map frame
+bool require_idle              # true: go only if this robot is idle (as the periodic decision)
+---
+ScoutDecision decision

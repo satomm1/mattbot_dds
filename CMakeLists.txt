@@ -73,6 +73,8 @@ add_message_files(
   ObservationStop.msg
   ObservationEvent.msg
   ObservationResult.msg
+  ScoutCandidate.msg
+  ScoutDecision.msg
 )
 
 ## Generate services in the 'srv' folder
@@ -81,6 +83,7 @@ add_service_files(
   GetLedger.srv
   RemoveObject.srv
   SelectObservations.srv
+  EvaluateScout.srv
 )
 
 ## Generate actions in the 'action' folder

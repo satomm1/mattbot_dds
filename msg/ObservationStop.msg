@@ -1,6 +1,7 @@
 # Where to stop and which objects to observe there (see mattbot_navigation observation_planner).
 uint8 OPPORTUNISTIC=0    # kind: stop is on the planned path
 uint8 DETOUR=1           # kind: stop is a viewpoint off the path (leave the path, look, replan)
+uint8 SCOUT=2            # kind: an idle robot drives out only to look (not executed yet; see ScoutDecision)
 uint8 REMAINING_PATH=0   # resume: continue the remaining trajectory
 uint8 REPLAN=1           # resume: replan to the goal from the stop
 
